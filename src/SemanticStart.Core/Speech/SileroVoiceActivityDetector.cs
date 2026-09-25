@@ -1,0 +1,133 @@
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
+
+namespace SemanticStart.Core.Speech;
+
+/// <summary>
+/// Whether audio is speech, frame by frame.
+///
+/// <para>
+/// Behind an interface for the same reason the microphone is: endpointing timing is worth testing
+/// on a machine that has neither a model file nor a sound card, and the rule that consumes these
+/// probabilities lives in <see cref="SpeechEndpointDetector"/>.
+/// </para>
+/// </summary>
+public interface IVoiceActivityDetector : IDisposable
+{
+    /// <summary>How many 16 kHz samples one call to <see cref="Process"/> expects.</summary>
+    int FrameSamples { get; }
+
+    /// <summary>How much audio one frame covers.</summary>
+    TimeSpan FrameDuration { get; }
+
+    /// <summary>The probability, in [0, 1], that the frame is speech.</summary>
+    float Process(ReadOnlySpan<float> frame);
+
+    /// <summary>Forgets the current utterance. Called before each dictation session.</summary>
+    void Reset();
+}
+
+/// <summary>
+/// Silero VAD, run on the ONNX Runtime the app already loads for embeddings.
+///
+/// <para>
+/// Knowing when the user has stopped talking is what makes dictation feel finished rather than
+/// abandoned, and it cannot be answered by loudness: a quiet room has a noise floor, and any
+/// energy threshold that survives a fan is tripped by a keyboard. Silero is a 2 MB model that
+/// answers "is this frame speech" directly, and reusing the runtime already in the process means
+/// it costs one more session rather than another native dependency.
+/// </para>
+/// <para>
+/// The model is the v5 graph: it takes a frame of exactly <see cref="FrameSampleCount"/> samples at
+/// 16 kHz along with a carried recurrent state, and returns one speech probability. The state is
+/// what makes it a sequence model rather than a per-frame classifier, so it belongs to one
+/// utterance and is cleared by <see cref="Reset"/>.
+/// </para>
+/// </summary>
+public sealed class SileroVoiceActivityDetector : IVoiceActivityDetector
+{
+    /// <summary>The v5 model's fixed frame size at 16 kHz: 512 samples, 32 ms.</summary>
+    public const int FrameSampleCount = 512;
+
+    private const int StateDimensions = 128;
+
+    private readonly InferenceSession _session;
+    private readonly long[] _sampleRate = [MonoFloatResampler.TargetSampleRate];
+    private float[] _state = new float[2 * StateDimensions];
+    private bool _disposed;
+
+    public SileroVoiceActivityDetector(string modelPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelPath);
+        if (!File.Exists(modelPath))
+            throw new FileNotFoundException("Silero VAD model was not found.", modelPath);
+
+        // One thread and sequential execution: the work is a 2 MB model on 32 ms of audio every
+        // 32 ms, so scheduling it across cores costs more than it saves and competes with the
+        // recognizer, which is the part of the pipeline that is actually latency-bound.
+        var sessionOptions = new SessionOptions
+        {
+            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+            InterOpNumThreads = 1,
+            IntraOpNumThreads = 1,
+        };
+
+        _session = new InferenceSession(modelPath, sessionOptions);
+    }
+
+    public int FrameSamples => FrameSampleCount;
+
+    /// <summary>How much audio one frame covers: 32 ms.</summary>
+    public TimeSpan FrameDuration { get; } =
+        TimeSpan.FromSeconds((double)FrameSampleCount / MonoFloatResampler.TargetSampleRate);
+
+    /// <summary>
+    /// The probability that <paramref name="frame"/> is speech. The frame must be exactly
+    /// <see cref="FrameSampleCount"/> samples; the model's shape is fixed and a short frame would be
+    /// silently misread as quieter speech.
+    /// </summary>
+    public float Process(ReadOnlySpan<float> frame)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (frame.Length != FrameSampleCount)
+            throw new ArgumentException($"Silero VAD expects frames of exactly {FrameSampleCount} samples.", nameof(frame));
+
+        var input = new DenseTensor<float>(new[] { 1, FrameSampleCount });
+        for (var i = 0; i < FrameSampleCount; i++)
+            input[0, i] = frame[i];
+
+        var state = new DenseTensor<float>(_state, [2, 1, StateDimensions]);
+
+        var inputs = new List<NamedOnnxValue>
+        {
+            NamedOnnxValue.CreateFromTensor("input", input),
+            NamedOnnxValue.CreateFromTensor("state", state),
+            NamedOnnxValue.CreateFromTensor("sr", new DenseTensor<long>(_sampleRate, [1])),
+        };
+
+        using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results = _session.Run(inputs);
+
+        var probability = results.FirstOrDefault(result => result.Name == "output")
+            ?? results.FirstOrDefault()
+            ?? throw new InvalidOperationException("The Silero VAD model returned no outputs.");
+
+        if (results.FirstOrDefault(result => result.Name == "stateN") is { } nextState)
+            _state = [.. nextState.AsTensor<float>()];
+
+        return probability.AsTensor<float>().First();
+    }
+
+    /// <summary>Forgets the current utterance. Call before each dictation session.</summary>
+    public void Reset() => _state = new float[2 * StateDimensions];
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _session.Dispose();
+        _disposed = true;
+    }
+}
