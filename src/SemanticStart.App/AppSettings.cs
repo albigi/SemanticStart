@@ -19,7 +19,7 @@ public sealed record AppSettings
     /// installed we would simply never open. The period keeps the same one-handed bottom-row shape
     /// as Space without the collision.
     /// </summary>
-    public const string DefaultHotKey = "Win+Alt+.";
+    internal const string DefaultHotKey = "Win+Alt+.";
 
     /// <summary>
     /// Defaults we have shipped before, migrated away from on load. Win+Alt+Space is here because
@@ -33,7 +33,7 @@ public sealed record AppSettings
     /// of the keyboard the shell and Game Bar have left alone, and sits next to the activation
     /// chord so the two are one key apart.
     /// </summary>
-    public const string DefaultDictationHotKey = "Win+Alt+/";
+    internal const string DefaultDictationHotKey = "Win+Alt+/";
 
     public string HotKey { get; init; } = DefaultHotKey;
 

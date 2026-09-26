@@ -88,6 +88,13 @@ public sealed class DictationController : IDisposable
         if (_disposed || !_settings.DictationEnabled)
             return Task.CompletedTask;
 
+        // Task.Run rather than TaskFactory.StartNew: this is called on the UI thread, and
+        // StartNew queues to TaskScheduler.Current - which is the UI scheduler whenever the caller
+        // is itself inside a dispatcher-marshalled continuation - so the model load would run on
+        // the STA thread it exists to stay off. Task.Run always means TaskScheduler.Default, and
+        // unwraps the async delegate instead of handing back a Task<Task>. LongRunning is wrong
+        // here for the same reason: the load is mostly awaited I/O, and the CPU-bound stretch is
+        // short enough not to be worth a dedicated thread.
         _warmStart ??= Task.Run(CreateEngineAsync);
         return _warmStart;
     }
@@ -156,6 +163,9 @@ public sealed class DictationController : IDisposable
                         Log.Error(ex, "Disposing the dictation engine failed");
                     }
                 },
+                // The load itself is cancelled above, by _startup. This token is the
+                // continuation's own, and must stay None: a cancelled continuation would skip the
+                // disposal and leak the native ONNX sessions it exists to release.
                 CancellationToken.None,
                 TaskContinuationOptions.OnlyOnRanToCompletion,
                 TaskScheduler.Default).ContinueWith(_ => _startup.Dispose(), TaskScheduler.Default);

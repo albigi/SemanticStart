@@ -50,6 +50,13 @@ public sealed class ActivationManager : IDisposable
     private AppSettings _settings;
     private HwndSource? _source;
     private HotKeySpec? _dictationSpec;
+
+    // Which ids the shell is actually holding for us. Releasing an id that was never taken returns
+    // ERROR_HOTKEY_NOT_REGISTERED, which is harmless but makes the ordinary case - dictation off,
+    // so nothing to release - indistinguishable from a genuine failure to let a chord go. Tracking
+    // it means the only UnregisterHotKey failures that reach the log are real ones.
+    private bool _activationHotKeyHeld;
+    private bool _dictationHotKeyHeld;
     private bool _disposed;
 
     public ActivationManager(Dispatcher dispatcher, Action activate, AppSettings settings, Action? activateDictation = null)
@@ -162,6 +169,7 @@ public sealed class ActivationManager : IDisposable
             var (modifiers, key) = ParseHotKey(candidate);
             if (RegisterHotKey(handle, HotKeyId, modifiers | ModNoRepeat, key))
             {
+                _activationHotKeyHeld = true;
                 ActiveHotKey = candidate;
                 Log.Info($"Registered hotkey {candidate} (mod=0x{modifiers:X}, vk=0x{key:X}).");
                 HotKeyRegistered?.Invoke(candidate, !string.Equals(candidate, _settings.HotKey, StringComparison.OrdinalIgnoreCase));
@@ -182,12 +190,13 @@ public sealed class ActivationManager : IDisposable
                 var probeId = HotKeyId + 1;
                 if (RegisterHotKey(handle, probeId, modifiers | ModNoRepeat, key))
                 {
-                    UnregisterHotKey(handle, probeId);
+                    Release(handle, probeId, candidate);
                     Log.Info($"  ...but {candidate} registered fine under id {probeId}, so id {HotKeyId} was the problem.");
                 }
             }
         }
 
+        _activationHotKeyHeld = false;
         ActiveHotKey = null;
         HotKeyRegistered?.Invoke(null, true);
         Log.Info("No hotkey could be registered; use the tray icon to open SemanticStart.");
@@ -200,6 +209,7 @@ public sealed class ActivationManager : IDisposable
     /// </summary>
     private void RegisterDictationHotKey(IntPtr handle)
     {
+        _dictationHotKeyHeld = false;
         _dictationSpec = null;
         ActiveDictationHotKey = null;
 
@@ -213,6 +223,7 @@ public sealed class ActivationManager : IDisposable
 
             if (RegisterHotKey(handle, DictationHotKeyId, spec.Modifiers | ModNoRepeat, spec.VirtualKey))
             {
+                _dictationHotKeyHeld = true;
                 _dictationSpec = spec;
                 ActiveDictationHotKey = candidate;
                 var substituted = !string.Equals(candidate, _settings.DictationHotKey, StringComparison.OrdinalIgnoreCase);
@@ -300,12 +311,27 @@ public sealed class ActivationManager : IDisposable
     {
         if (_source?.Handle is { } handle && handle != IntPtr.Zero)
         {
-            UnregisterHotKey(handle, HotKeyId);
-            UnregisterHotKey(handle, DictationHotKeyId);
+            if (_activationHotKeyHeld)
+                Release(handle, HotKeyId, ActiveHotKey);
+            if (_dictationHotKeyHeld)
+                Release(handle, DictationHotKeyId, ActiveDictationHotKey);
         }
 
+        _activationHotKeyHeld = false;
+        _dictationHotKeyHeld = false;
         _dictationSpec = null;
         ActiveDictationHotKey = null;
+    }
+
+    /// <summary>
+    /// Hands one chord back to the shell. The result is checked rather than discarded: a hotkey we
+    /// believe we hold and cannot release stays registered for the lifetime of the window, so the
+    /// next registration pass would fail for a reason nothing else would explain.
+    /// </summary>
+    private static void Release(IntPtr handle, int id, string? chord)
+    {
+        if (!UnregisterHotKey(handle, id))
+            Log.Info($"UnregisterHotKey failed for {chord ?? "(unknown chord)"} (hwnd=0x{handle:X}, id={id}); Win32={Marshal.GetLastWin32Error()}");
     }
 
     /// <summary>
