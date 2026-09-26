@@ -75,7 +75,8 @@ public sealed class MonoFloatResampler
             // Interpolating backwards, between the previous frame and this one, is what lets a
             // buffer be converted the moment it arrives: interpolating forwards would need the
             // frame after the last one, which is in a packet the device has not delivered yet.
-            // The cost is a fixed sub-sample delay, which nothing downstream can observe.
+            // The cost is a delay of up to one input frame - exactly one when the rates already
+            // match and no interpolation is needed at all - which nothing downstream can observe.
             var left = index == 0
                 ? _hasPrevious ? _previous : FrameAt(source, 0)
                 : FrameAt(source, index - 1);

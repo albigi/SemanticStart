@@ -122,7 +122,9 @@ public sealed class SpeechEndpointDetectorTests
 
         Assert.False(detector.IsEndpointReached);
 
-        // The speaker has genuinely stopped this time.
+        // The speaker has genuinely stopped this time. The 200 ms already counted is discarded by
+        // the frame of speech before it, so the full window has to run again from zero.
+        Assert.False(detector.Accept(Speech, Frame));
         for (var i = 0; i < 10; i++)
             Assert.False(detector.Accept(Silence, Frame));
 
