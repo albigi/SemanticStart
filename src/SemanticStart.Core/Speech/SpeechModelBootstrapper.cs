@@ -72,12 +72,20 @@ public sealed class SpeechModelBootstrapper
     private const long MinimumTokensBytes = 1_000;
     private const long MinimumVadBytes = 1_000_000;
 
+    /// <summary>
+    /// Shared by every bootstrapper that is not handed a client of its own. The settings window,
+    /// the warm start, and the harness each construct one of these, and a per-instance client
+    /// would leak a connection pool every time; a download this size also wants a long timeout,
+    /// which is the only reason the default client is not used.
+    /// </summary>
+    private static readonly HttpClient SharedHttpClient = new() { Timeout = TimeSpan.FromMinutes(10) };
+
     private readonly HttpClient _httpClient;
     private readonly string _modelsDirectory;
 
     public SpeechModelBootstrapper(HttpClient? httpClient = null, string? modelsDirectory = null)
     {
-        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        _httpClient = httpClient ?? SharedHttpClient;
         _modelsDirectory = modelsDirectory ?? AppPaths.ModelsDirectory;
     }
 

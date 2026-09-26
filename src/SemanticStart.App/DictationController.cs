@@ -123,7 +123,10 @@ public sealed class DictationController : IDisposable
         _disposed = true;
 
         Stop();
-        _startGate.Dispose();
+
+        // The start gate is deliberately not disposed: a start that is still between its wait and
+        // its release would then throw on a background task during shutdown, which is a crash log
+        // for no benefit. Letting it be collected costs nothing.
 
         // The warm-start task owns the engine until it completes, so disposing here would race it.
         // Hand the disposal to whichever finishes last.

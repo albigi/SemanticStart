@@ -444,8 +444,8 @@ paths or documents according to that model provider's privacy policy.
 
 Queries never leave the machine, and neither does anything said to it: dictation is transcribed by
 a local model and no audio is stored or transmitted. The only network traffic is the one-time
-embedding and speech model downloads
-and online enrichment during indexing, which sends only app and feature names, is cached to disk,
+embedding and speech model downloads, and online enrichment during indexing, which sends only app
+and feature names, is cached to disk,
 and is on by default but can be turned off in setup or Settings; the index is fully functional
 without it, just less able to find tools you cannot name. No inference of any kind leaves the
 machine.

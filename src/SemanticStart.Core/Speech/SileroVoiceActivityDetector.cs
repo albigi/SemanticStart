@@ -109,9 +109,12 @@ public sealed class SileroVoiceActivityDetector : IVoiceActivityDetector
 
         using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results = _session.Run(inputs);
 
+        // Named rather than positional, and with no fallback: the other output is the recurrent
+        // state, and reading a state value as a speech probability would not fail - it would
+        // quietly endpoint at the wrong moments for the rest of the session.
         var probability = results.FirstOrDefault(result => result.Name == "output")
-            ?? results.FirstOrDefault()
-            ?? throw new InvalidOperationException("The Silero VAD model returned no outputs.");
+            ?? throw new InvalidOperationException(
+                "The Silero VAD model has no 'output' tensor, so it is not the expected v5 model.");
 
         if (results.FirstOrDefault(result => result.Name == "stateN") is { } nextState)
             _state = [.. nextState.AsTensor<float>()];

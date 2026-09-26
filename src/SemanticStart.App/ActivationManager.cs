@@ -237,10 +237,12 @@ public sealed class ActivationManager : IDisposable
     /// </summary>
     private IEnumerable<string> CandidateDictationHotKeys()
     {
+        // Compared in normalized form rather than as typed: "Win+Alt+/" and a chord spelled any
+        // other way that parses to the same modifiers and key are the same registration, and the
+        // exclusion has to hold for the chord rather than for the string.
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (ActiveHotKey is { } active)
-            seen.Add(active);
-        seen.Add(_settings.HotKey);
+        Exclude(ActiveHotKey);
+        Exclude(_settings.HotKey);
 
         foreach (var candidate in new[]
                  {
@@ -253,10 +255,20 @@ public sealed class ActivationManager : IDisposable
                      "Ctrl+Shift+/",
                  })
         {
-            if (!string.IsNullOrWhiteSpace(candidate) && seen.Add(candidate))
+            if (!string.IsNullOrWhiteSpace(candidate) && seen.Add(Normalize(candidate)))
                 yield return candidate;
         }
+
+        void Exclude(string? chord)
+        {
+            if (!string.IsNullOrWhiteSpace(chord))
+                seen.Add(Normalize(chord));
+        }
     }
+
+    /// <summary>The chord in the one spelling every equivalent chord shares.</summary>
+    private static string Normalize(string chord)
+        => HotKeySpec.TryParse(chord, out var spec, out _) && spec is not null ? spec.Normalized : chord;
 
     /// <summary>
     /// The configured hotkey first, then progressively less contended combinations. None of these
