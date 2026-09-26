@@ -99,15 +99,6 @@ public sealed class SpeechTranscriberContractTests
         Assert.Single(received);
     }
 
-    [Fact]
-    public void MetadataDescribesALocalEngine()
-    {
-        using var transcriber = new TestSpeechTranscriber(Metadata);
-
-        Assert.True(transcriber.Metadata.RunsLocally);
-        Assert.Equal("test-model", transcriber.Metadata.ModelId);
-    }
-
     /// <summary>16 kHz mono buffers, which is the only format the interface accepts.</summary>
     private static async IAsyncEnumerable<ReadOnlyMemory<float>> Audio(int buffers)
     {

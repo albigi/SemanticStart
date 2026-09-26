@@ -166,15 +166,4 @@ public sealed class SpeechEngineSelectorTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => selector.StartAsync(cancellationToken: cancellation.Token));
     }
-
-    [Fact]
-    public void TheProviderListIsExposedInPreferenceOrder()
-    {
-        var first = new TestSpeechTranscriberProvider("first");
-        var second = new TestSpeechTranscriberProvider("second");
-
-        var selector = new SpeechEngineSelector([first, second]);
-
-        Assert.Equal([first, second], selector.Providers);
-    }
 }

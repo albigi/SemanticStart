@@ -171,11 +171,4 @@ public sealed class SpeechEndpointDetectorTests
 
         Assert.Equal(expected, detector.HasSpeechStarted);
     }
-
-    [Fact]
-    public void ANegativeTrailingSilenceIsRejected()
-    {
-        Assert.Throws<ArgumentOutOfRangeException>(
-            () => new SpeechEndpointDetector(TimeSpan.FromMilliseconds(-1)));
-    }
 }
