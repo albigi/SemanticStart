@@ -47,8 +47,20 @@ pollute the latency measurements.
   actually recognized.
 - A summary table of min/median/p95/max across all recorded utterances for both "from capture
   start" and "from first voiced frame", for both first-partial and final.
+- On stderr, anything the pipeline handled internally rather than throwing - dropped audio buffers,
+  a microphone that failed to stop - via `SpeechDiagnostics`. Latency measured over audio the
+  transcriber never received would be quietly optimistic, so these are kept visible and kept off
+  stdout, where the table is.
 
 ## Failure modes
+
+Ctrl+C is honoured: the first press cancels the download or the current utterance - so a partial
+download is cleaned up rather than left behind - and the summary is printed for the utterances
+already recorded. A second press ends the process outright, which is what the prompt between
+utterances needs, since a blocking `Console.ReadLine` cannot be interrupted by a token.
+
+A download that makes no progress for two minutes is abandoned with an explanation. The limit is on
+silence rather than on total time, so a slow but working connection is never cut off mid-transfer.
 
 If the default microphone is missing or Windows has blocked desktop-app microphone access, the
 probe fails loudly with the same `MicrophoneUnavailableException` message the app itself would

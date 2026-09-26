@@ -11,6 +11,31 @@ using SemanticStart.Core.Speech;
 
 var iterations = ParseIterationCount(args);
 
+// Ctrl+C has to reach the model download and the microphone, not just kill the process: a probe
+// that is aborted mid-download leaves a half-written temp file that the next run has to clean up,
+// and SpeechModelBootstrapper only does that cleanup on a cancelled token.
+using var cancellation = new CancellationTokenSource();
+Console.CancelKeyPress += (_, eventArgs) =>
+{
+    // Only the first Ctrl+C is intercepted. The prompt below sits in a blocking Console.ReadLine
+    // that a token cannot interrupt, so a second Ctrl+C has to be left alone to end the process -
+    // otherwise asking politely would make the probe impossible to quit.
+    if (cancellation.IsCancellationRequested)
+        return;
+
+    eventArgs.Cancel = true;
+    cancellation.Cancel();
+};
+
+// The pipeline reports what it handled internally rather than throwing it - dropped audio buffers,
+// a microphone that failed to stop. A latency probe that does not show those is reporting numbers
+// measured on audio the transcriber never received, so they go to stderr, out of the way of the
+// table on stdout.
+SpeechDiagnostics.Reported += report => Console.Error.WriteLine(
+    report.Exception is { } ex
+        ? $"[{report.Operation}] {report.Message} {ex}"
+        : $"[{report.Operation}] {report.Message}");
+
 Console.WriteLine($"Runtime: {RuntimeInformation.FrameworkDescription}");
 Console.WriteLine($"OS: {RuntimeInformation.OSDescription}");
 Console.WriteLine($"Architecture: {RuntimeInformation.ProcessArchitecture}");
@@ -35,10 +60,33 @@ Console.WriteLine(alreadyDownloaded
     ? "Model files already present on disk."
     : $"Downloading the speech model (~{SpeechModelBootstrapper.ApproximateDownloadBytes / (1024 * 1024):N0} MB) - this only happens once.");
 
+// A wall-clock limit on a 75 MB download would fail an honest slow connection, so what is bounded
+// is silence: the deadline is pushed out on every progress report, and only a transfer that has
+// actually stalled trips it. HttpClient's own 10-minute timeout covers a connection that never
+// opens; this covers one that opens and then stops.
+using var stalled = new CancellationTokenSource(ProbeTimeouts.DownloadStall);
+using var loadCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token, stalled.Token);
+
 var loadStopwatch = Stopwatch.StartNew();
-var transcriber = await provider.CreateAsync(
-    new Progress<double>(p => Console.Write($"\rDownload/load progress: {p:P0}   ")),
-    CancellationToken.None).ConfigureAwait(false);
+ISpeechTranscriber transcriber;
+try
+{
+    transcriber = await provider.CreateAsync(
+        new Progress<double>(p =>
+        {
+            stalled.CancelAfter(ProbeTimeouts.DownloadStall);
+            Console.Write($"\rDownload/load progress: {p:P0}   ");
+        }),
+        loadCancellation.Token);
+}
+catch (OperationCanceledException)
+{
+    Console.Error.WriteLine();
+    Console.Error.WriteLine(stalled.IsCancellationRequested && !cancellation.IsCancellationRequested
+        ? $"The model download made no progress for {ProbeTimeouts.DownloadStall.TotalMinutes:N0} minutes and was abandoned."
+        : "Cancelled.");
+    return 3;
+}
 loadStopwatch.Stop();
 if (!alreadyDownloaded)
     Console.WriteLine();
@@ -57,11 +105,15 @@ try
 {
     for (var i = 1; i <= iterations; i++)
     {
+        cancellation.Token.ThrowIfCancellationRequested();
+
         Console.WriteLine($"--- Utterance {i} of {iterations} ---");
         Console.Write("Press Enter, then speak a short phrase: ");
         Console.ReadLine();
 
-        var result = await RunOneUtteranceAsync(engine, i).ConfigureAwait(false);
+        cancellation.Token.ThrowIfCancellationRequested();
+
+        var result = await RunOneUtteranceAsync(engine, i, cancellation.Token);
         results.Add(result);
 
         Console.WriteLine($"  First partial: {Format(result.CaptureToFirstPartial)} from capture start" +
@@ -72,6 +124,11 @@ try
             $" - \"{result.FinalText}\"");
         Console.WriteLine();
     }
+}
+catch (OperationCanceledException)
+{
+    Console.WriteLine();
+    Console.WriteLine("Cancelled; reporting the utterances completed so far.");
 }
 catch (MicrophoneUnavailableException ex)
 {
@@ -85,7 +142,10 @@ catch (MicrophoneUnavailableException ex)
 PrintSummary(results);
 return 0;
 
-static async Task<UtteranceResult> RunOneUtteranceAsync(DictationEngine engine, int index)
+static async Task<UtteranceResult> RunOneUtteranceAsync(
+    DictationEngine engine,
+    int index,
+    CancellationToken cancellationToken)
 {
     var stopwatch = Stopwatch.StartNew();
     TimeSpan? firstVoicedFrame = null;
@@ -121,7 +181,10 @@ static async Task<UtteranceResult> RunOneUtteranceAsync(DictationEngine engine, 
         }
     }
 
-    await engine.ListenAsync(new DictationOptions(), OnTranscript, OnLevel).ConfigureAwait(false);
+    // ConfigureAwait is deliberately absent throughout: a console app has no SynchronizationContext
+    // to capture, so it would be a no-op here. It is used in SemanticStart.Core, which is consumed
+    // by the WPF app, where the continuation would otherwise be posted to the UI thread.
+    await engine.ListenAsync(new DictationOptions(), OnTranscript, OnLevel, cancellationToken);
 
     return new UtteranceResult(
         index,
@@ -176,6 +239,9 @@ static TimeSpan Percentile(IReadOnlyList<TimeSpan> sortedSamples, double percent
 
 static string Format(TimeSpan value) => $"{value.TotalMilliseconds:F0} ms";
 
+// Top-level statements: these are local functions of the generated entry point, which cannot carry
+// an accessibility modifier. They are private to Program either way, and this matches
+// TensorPrimitivesProbe.
 static int ParseIterationCount(string[] args)
 {
     const int defaultIterations = 5;
@@ -186,6 +252,12 @@ static int ParseIterationCount(string[] args)
         throw new ArgumentException($"Expected a positive utterance count, got \"{args[0]}\".");
 
     return parsed;
+}
+
+internal static class ProbeTimeouts
+{
+    /// <summary>How long the download may make no progress at all before it is abandoned.</summary>
+    internal static readonly TimeSpan DownloadStall = TimeSpan.FromMinutes(2);
 }
 
 /// <summary>One utterance's timing, from capture start and from the first voiced frame proxy.</summary>

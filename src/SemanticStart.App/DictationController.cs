@@ -35,6 +35,13 @@ public sealed class DictationController : IDisposable
     private readonly Action _showOverlay;
     private readonly SemaphoreSlim _startGate = new(1, 1);
 
+    /// <summary>
+    /// Cancels the warm start. Loading the engine can involve a model download, so without this a
+    /// shutdown during first run would leave an HTTP read running against a temp file until
+    /// HttpClient's own timeout, and would finish by constructing a recognizer nobody wants.
+    /// </summary>
+    private readonly CancellationTokenSource _startup = new();
+
     private AppSettings _settings;
     private DictationEngine? _engine;
     private Task<DictationEngine?>? _warmStart;
@@ -124,6 +131,7 @@ public sealed class DictationController : IDisposable
         _disposed = true;
 
         Stop();
+        _startup.Cancel();
 
         // The start gate is deliberately not disposed: a start that is still between its wait and
         // its release would then throw on a background task during shutdown, which is a crash log
@@ -150,7 +158,7 @@ public sealed class DictationController : IDisposable
                 },
                 CancellationToken.None,
                 TaskContinuationOptions.OnlyOnRanToCompletion,
-                TaskScheduler.Default);
+                TaskScheduler.Default).ContinueWith(_ => _startup.Dispose(), TaskScheduler.Default);
         }
         else
         {
@@ -162,6 +170,8 @@ public sealed class DictationController : IDisposable
             {
                 Log.Error(ex, "Disposing the dictation engine failed");
             }
+
+            _startup.Dispose();
         }
     }
 
@@ -172,7 +182,7 @@ public sealed class DictationController : IDisposable
         {
             var models = new SpeechModelBootstrapper();
             var selector = new SpeechEngineSelector([new SherpaOnnxSpeechProvider(models)]);
-            var startup = await selector.StartAsync().ConfigureAwait(false);
+            var startup = await selector.StartAsync(cancellationToken: _startup.Token).ConfigureAwait(false);
 
             // Every provider that said no, with its reason, rather than only the first one that
             // ends up in the status line: with a second engine this is the only record of why the
@@ -200,6 +210,13 @@ public sealed class DictationController : IDisposable
             _engine = engine;
             Log.Info($"Dictation ready: {engine.Metadata.DisplayName} ({engine.Metadata.ModelId}) in {started.ElapsedMilliseconds} ms.");
             return engine;
+        }
+        catch (OperationCanceledException) when (_startup.IsCancellationRequested)
+        {
+            // Shutdown, not a failure. Recorded rather than dropped so a log that ends here is
+            // distinguishable from one where the load simply never finished.
+            Log.Info($"The dictation engine load was abandoned at shutdown after {started.ElapsedMilliseconds} ms.");
+            return null;
         }
         catch (Exception ex)
         {
