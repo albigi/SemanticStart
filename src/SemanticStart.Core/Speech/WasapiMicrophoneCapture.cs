@@ -50,21 +50,39 @@ public sealed class WasapiMicrophoneCapture : IAudioCaptureSource
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        using var activity = SpeechDiagnostics.StartActivity(SpeechDiagnostics.CaptureActivity);
+
         using var device = OpenDefaultDevice();
         using var capture = new WasapiCapture(device, useEventSync: true, audioBufferMillisecondsLength: BufferMilliseconds);
 
         var format = capture.WaveFormat;
         var resampler = new MonoFloatResampler(format.SampleRate, format.Channels);
 
+        // The device's own mix format, not ours: when capture misbehaves this is the first thing
+        // anyone reading a trace needs, and it is different on every machine.
+        activity?.SetTag("audio.device.sample_rate", format.SampleRate);
+        activity?.SetTag("audio.device.channels", format.Channels);
+        activity?.SetTag("audio.device.bits_per_sample", format.BitsPerSample);
+        activity?.SetTag("audio.device.encoding", format.Encoding.ToString());
+
+        var captured = 0L;
+        var dropped = 0L;
+
         // Dropping the oldest buffer beats blocking the audio thread: WASAPI's callback runs on a
         // real-time thread and stalling it glitches capture for every app on the machine. A
         // consumer far enough behind to hit this bound has already lost the utterance anyway.
-        var channel = Channel.CreateBounded<ReadOnlyMemory<float>>(new BoundedChannelOptions(128)
-        {
-            FullMode = BoundedChannelFullMode.DropOldest,
-            SingleWriter = true,
-            SingleReader = true,
-        });
+        //
+        // A dropped buffer is still audio the user spoke that the transcriber never saw, and it
+        // cannot be thrown - the audio thread has nobody to throw to - so it is counted instead and
+        // reported with the trace, so a transcript with a hole in it has an explanation.
+        var channel = Channel.CreateBounded<ReadOnlyMemory<float>>(
+            new BoundedChannelOptions(128)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleWriter = true,
+                SingleReader = true,
+            },
+            itemDropped: _ => Interlocked.Increment(ref dropped));
 
         void OnDataAvailable(object? sender, WaveInEventArgs args)
         {
@@ -73,12 +91,23 @@ public sealed class WasapiMicrophoneCapture : IAudioCaptureSource
 
             var samples = ToFloatSamples(args.Buffer, args.BytesRecorded, format);
             var converted = resampler.Resample(samples);
-            if (converted.Length > 0)
-                channel.Writer.TryWrite(converted);
+            if (converted.Length == 0)
+                return;
+
+            captured += converted.Length;
+            channel.Writer.TryWrite(converted);
         }
 
-        void OnRecordingStopped(object? sender, StoppedEventArgs args) =>
-            channel.Writer.TryComplete(args.Exception is { } ex ? Describe(ex) : null);
+        void OnRecordingStopped(object? sender, StoppedEventArgs args)
+        {
+            // NAudio catches everything the capture thread throws, including anything raised from
+            // the handler above, and delivers it here instead of anywhere a caller can see it.
+            // Completing the channel with it is what turns it back into a thrown exception.
+            if (args.Exception is { } ex)
+                SpeechDiagnostics.ReportFailure("capture.thread", "The microphone capture thread stopped with an error.", ex);
+
+            channel.Writer.TryComplete(args.Exception is { } failure ? Describe(failure) : null);
+        }
 
         capture.DataAvailable += OnDataAvailable;
         capture.RecordingStopped += OnRecordingStopped;
@@ -102,14 +131,26 @@ public sealed class WasapiMicrophoneCapture : IAudioCaptureSource
             capture.DataAvailable -= OnDataAvailable;
             capture.RecordingStopped -= OnRecordingStopped;
 
+            activity?.SetTag("audio.samples_captured", captured);
+            activity?.SetTag("audio.buffers_dropped", Interlocked.Read(ref dropped));
+
+            if (Interlocked.Read(ref dropped) > 0)
+            {
+                SpeechDiagnostics.Report(
+                    "capture.dropped",
+                    $"The transcriber fell behind the microphone and {Interlocked.Read(ref dropped)} buffer(s) were dropped.");
+            }
+
             try
             {
                 capture.StopRecording();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Stopping a device that has already gone away is not a failure worth reporting:
-                // the session is ending either way.
+                // Stopping a device that has already gone away does not fail the session - it is
+                // ending either way - but it is still a native call that failed, and a COM error
+                // that nobody ever hears about is how a whole class of device bugs stays invisible.
+                SpeechDiagnostics.ReportFailure("capture.stop", "Stopping the microphone failed.", ex);
             }
         }
     }

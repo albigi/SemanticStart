@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows.Threading;
 using SemanticStart.Core;
 using SemanticStart.Core.Speech;
@@ -131,18 +132,58 @@ public sealed class DictationController : IDisposable
         // The warm-start task owns the engine until it completes, so disposing here would race it.
         // Hand the disposal to whichever finishes last.
         if (_warmStart is { } warmStart)
-            _ = warmStart.ContinueWith(t => t.Result?.Dispose(), TaskContinuationOptions.OnlyOnRanToCompletion);
+        {
+            _ = warmStart.ContinueWith(
+                task =>
+                {
+                    // Nothing awaits this continuation, so an exception here would be an
+                    // unobserved task exception raised long after shutdown, attributed to nothing.
+                    // Releasing native ONNX sessions is exactly where that would happen.
+                    try
+                    {
+                        task.Result?.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "Disposing the dictation engine failed");
+                    }
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnRanToCompletion,
+                TaskScheduler.Default);
+        }
         else
-            _engine?.Dispose();
+        {
+            try
+            {
+                _engine?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Disposing the dictation engine failed");
+            }
+        }
     }
 
     private async Task<DictationEngine?> CreateEngineAsync()
     {
+        var started = Stopwatch.StartNew();
         try
         {
             var models = new SpeechModelBootstrapper();
             var selector = new SpeechEngineSelector([new SherpaOnnxSpeechProvider(models)]);
             var startup = await selector.StartAsync().ConfigureAwait(false);
+
+            // Every provider that said no, with its reason, rather than only the first one that
+            // ends up in the status line: with a second engine this is the only record of why the
+            // one that was expected to win did not.
+            foreach (var rejection in startup.Rejected)
+            {
+                if (rejection.Exception is { } failure)
+                    Log.Error(failure, $"Speech provider '{rejection.Metadata.Id}' was rejected: {rejection.Reason}");
+                else
+                    Log.Info($"Speech provider '{rejection.Metadata.Id}' was rejected: {rejection.Reason}");
+            }
 
             if (!startup.IsAvailable || startup.Transcriber is null)
             {
@@ -157,13 +198,13 @@ public sealed class DictationController : IDisposable
                 () => new WasapiMicrophoneCapture());
 
             _engine = engine;
-            Log.Info($"Dictation ready: {engine.Metadata.DisplayName}.");
+            Log.Info($"Dictation ready: {engine.Metadata.DisplayName} ({engine.Metadata.ModelId}) in {started.ElapsedMilliseconds} ms.");
             return engine;
         }
         catch (Exception ex)
         {
             _unavailableReason = "The speech model could not be loaded; see the log for details.";
-            Log.Error(ex, "Failed to start the dictation engine");
+            Log.Error(ex, $"Failed to start the dictation engine after {started.ElapsedMilliseconds} ms");
             return null;
         }
     }
@@ -232,6 +273,10 @@ public sealed class DictationController : IDisposable
         }
         catch (OperationCanceledException)
         {
+            // Expected - it is how Stop, push-to-talk release and hiding the overlay all end a
+            // session - but a session that ends with no trace at all is indistinguishable from one
+            // that never started, so it is still recorded.
+            Log.Trace("Dictation session was cancelled.");
             _viewModel.EndDictation();
         }
         catch (MicrophoneUnavailableException ex)

@@ -11,6 +11,7 @@ public partial class App : System.Windows.Application
     private OverlayWindow? _overlayWindow;
     private ActivationManager? _activationManager;
     private DictationController? _dictation;
+    private SpeechTelemetry? _speechTelemetry;
     private TrayIconService? _trayIconService;
     private IndexRebuildCoordinator? _rebuilds;
     private IndexRefreshScheduler? _refreshScheduler;
@@ -29,6 +30,10 @@ public partial class App : System.Windows.Application
         AppPaths.EnsureCreated();
         Log.Initialize();
         InstallCrashLogging();
+
+        // Before anything speech-related exists, so the model load and the first dictation turn
+        // are traced like everything else rather than being the one part of the app that is quiet.
+        _speechTelemetry = SpeechTelemetry.Install();
         if (e.Args.Any(a => string.Equals(a, "--startup", StringComparison.OrdinalIgnoreCase)))
             Log.Info("Started from the Windows login registration.");
         ThemeService.Initialize(this);
@@ -232,6 +237,7 @@ public partial class App : System.Windows.Application
         _rebuilds?.Dispose();
         _activationManager?.Dispose();
         _dictation?.Dispose();
+        _speechTelemetry?.Dispose();
         _searchService?.Dispose();
         _shuttingDown = true;
         _activateSignal?.Dispose();

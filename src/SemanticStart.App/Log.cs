@@ -16,6 +16,13 @@ internal static class Log
 
     public static void Info(string message) => Write("INFO", message);
 
+    /// <summary>
+    /// A timing or step record rather than an event anyone asked for. Separated from
+    /// <see cref="Info"/> only by its level, so that a reader grepping the log for what the app
+    /// did is not wading through spans, and a reader profiling it can find nothing else.
+    /// </summary>
+    public static void Trace(string message) => Write("TRACE", message);
+
     public static void Error(Exception ex, string message) => Write("ERROR", $"{message}: {ex}");
 
     private static void Write(string level, string message)

@@ -267,6 +267,13 @@ Known limitations:
 `benchmarks/DictationLatencyProbe` measures microphone-to-first-partial and microphone-to-final
 latency on real hardware; see its README.
 
+Dictation logs to the same `%LOCALAPPDATA%\SemanticStart\logs\app.log` as the rest of the app, and
+adds `TRACE` lines with the timings that matter: how long the model took to load, how long until the
+first partial, why a session ended, and how much audio was captured or dropped. Those lines come
+from the `SemanticStart.Speech` activity source, so `dotnet-trace collect --providers
+SemanticStart.Speech` — or any OpenTelemetry listener — can sample the same spans with no change to
+the app. No transcript text is ever written to either; only lengths and durations.
+
 ### Where descriptions come from
 
 Description quality is what makes intent search work. Every description, task phrase, and synonym is

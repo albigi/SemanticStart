@@ -70,6 +70,14 @@ public sealed class SpeechEngineSelector(IReadOnlyList<ISpeechTranscriberProvide
             }
             catch (Exception ex)
             {
+                // The exception is kept whole on the rejection rather than reduced to its message,
+                // and reported here as well, so that a provider that failed to load leaves a stack
+                // in the log even though the app carries on to the next one as if nothing happened.
+                SpeechDiagnostics.ReportFailure(
+                    "engine.load",
+                    $"{provider.Metadata.DisplayName} failed to load and was skipped.",
+                    ex);
+
                 rejected.Add(new SpeechProviderRejection(provider.Metadata, ex.Message, ex));
             }
         }

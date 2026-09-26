@@ -375,6 +375,7 @@ public partial class SettingsWindow : Window
         }
         catch (OperationCanceledException)
         {
+            Log.Info("The speech model download was cancelled.");
             DictationStatus.Text = "Speech model download cancelled.";
         }
         catch (Exception ex)

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using SemanticStart.Core;
 
@@ -117,6 +118,10 @@ public sealed class SpeechModelBootstrapper
         AppPaths.EnsureCreated();
         Directory.CreateDirectory(_modelsDirectory);
 
+        using var activity = SpeechDiagnostics.StartActivity(SpeechDiagnostics.ModelEnsureActivity);
+        activity?.SetTag("speech.model", ModelId);
+        activity?.SetTag("speech.model.already_present", IsDownloaded);
+
         // Weighted by size so the bar moves at roughly a constant rate: the encoder is the
         // download, and the other three together are rounding error.
         await DownloadIfNeededAsync(DefaultEncoderUrl, EncoderPath, MinimumEncoderBytes, null, ScaleProgress(progress, 0.0, 0.92), cancellationToken).ConfigureAwait(false);
@@ -150,6 +155,15 @@ public sealed class SpeechModelBootstrapper
             return;
         }
 
+        // Per file rather than per model: a download that stalls stalls on one of five files, and
+        // the span says which, how big it was and how long it took without anyone adding logging
+        // to a loop that runs a thousand times a megabyte.
+        using var activity = SpeechDiagnostics.StartActivity(SpeechDiagnostics.ModelDownloadActivity);
+        activity?.SetTag("http.url", url);
+        activity?.SetTag("speech.model.file", Path.GetFileName(path));
+
+        SpeechDiagnostics.Report("model.download", $"Downloading {Path.GetFileName(path)} from {url}.");
+
         var tempPath = path + ".tmp";
         try
         {
@@ -180,15 +194,19 @@ public sealed class SpeechModelBootstrapper
                     if (contentLength is > 0)
                         progress?.Report((double)totalRead / contentLength.Value);
                 }
+
+                activity?.SetTag("http.response.body.size", totalRead);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            activity?.SetStatus(ActivityStatusCode.Error, "cancelled");
             TryDelete(tempPath);
             throw;
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException or InvalidOperationException)
         {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
             TryDelete(tempPath);
             throw new SpeechModelDownloadException(
                 $"Could not download the speech model from {url}. Check network connectivity or pre-place the file at {path}.",
@@ -223,6 +241,11 @@ public sealed class SpeechModelBootstrapper
     private static bool IsUsableFile(string path, long minimumBytes) =>
         File.Exists(path) && new FileInfo(path).Length >= minimumBytes;
 
+    /// <summary>
+    /// Removes a half-written temp file. Failing to is not worth failing the download over - the
+    /// next attempt overwrites it - but it is reported, because a temp file that cannot be deleted
+    /// is usually a permissions or antivirus problem that will fail the retry as well.
+    /// </summary>
     private static void TryDelete(string path)
     {
         try
@@ -230,11 +253,12 @@ public sealed class SpeechModelBootstrapper
             if (File.Exists(path))
                 File.Delete(path);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-        }
-        catch (UnauthorizedAccessException)
-        {
+            SpeechDiagnostics.ReportFailure(
+                "model.cleanup",
+                $"Could not delete the partial download at {path}.",
+                ex);
         }
     }
 }

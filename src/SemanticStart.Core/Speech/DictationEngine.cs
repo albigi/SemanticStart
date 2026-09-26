@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
 namespace SemanticStart.Core.Speech;
@@ -53,6 +54,19 @@ public sealed class DictationEngine : IDisposable
 
         _voiceActivity.Reset();
 
+        // The span every latency question is asked of: the two numbers a user feels are how long
+        // until words appear and how long after they stop talking the box settles. Both are
+        // recorded as tags rather than logged lines so that sampling a hundred sessions is a
+        // query, not a parse. Lengths only - what was said never leaves the machine's memory.
+        using var activity = SpeechDiagnostics.StartActivity(SpeechDiagnostics.ListenActivity);
+        activity?.SetTag("speech.provider", _transcriber.Metadata.Id);
+        activity?.SetTag("speech.trailing_silence_ms", options.TrailingSilence.TotalMilliseconds);
+
+        var turn = Stopwatch.StartNew();
+        var partials = 0;
+        var finalLength = 0;
+        TimeSpan? firstPartial = null;
+
         using var microphone = _microphoneFactory();
 
         // Ending the audio enumeration is what makes the transcriber flush, so the endpoint has to
@@ -61,8 +75,38 @@ public sealed class DictationEngine : IDisposable
 
         var audio = EndpointedAudioAsync(microphone, options, onLevel, stop, cancellationToken);
 
-        await foreach (var transcript in _transcriber.TranscribeAsync(audio, cancellationToken).ConfigureAwait(false))
-            onTranscript(transcript);
+        try
+        {
+            await foreach (var transcript in _transcriber.TranscribeAsync(audio, cancellationToken).ConfigureAwait(false))
+            {
+                switch (transcript)
+                {
+                    case PartialTranscript partial:
+                        partials++;
+                        firstPartial ??= turn.Elapsed;
+                        activity?.SetTag("speech.partial_chars", partial.Text.Length);
+                        break;
+                    case FinalTranscript final:
+                        finalLength = final.Text.Length;
+                        break;
+                }
+
+                onTranscript(transcript);
+            }
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
+            throw;
+        }
+        finally
+        {
+            activity?.SetTag("speech.partial_count", partials);
+            activity?.SetTag("speech.final_chars", finalLength);
+            activity?.SetTag("speech.first_partial_ms", firstPartial?.TotalMilliseconds);
+            activity?.SetTag("speech.turn_ms", turn.Elapsed.TotalMilliseconds);
+            activity?.SetTag("speech.cancelled", cancellationToken.IsCancellationRequested);
+        }
     }
 
     /// <summary>
@@ -112,6 +156,7 @@ public sealed class DictationEngine : IDisposable
                 filled = 0;
                 if (endpoint.Accept(_voiceActivity.Process(frame), _voiceActivity.FrameDuration))
                 {
+                    Activity.Current?.SetTag("speech.end_reason", "endpoint");
                     await stop.CancelAsync().ConfigureAwait(false);
                     yield break;
                 }
@@ -126,6 +171,19 @@ public sealed class DictationEngine : IDisposable
 
             if (expired || cancellationToken.IsCancellationRequested)
             {
+                // Why a session ended is the first question asked of a dictation that "did not
+                // work": a timeout, a cancel and a clean endpoint look identical from outside.
+                Activity.Current?.SetTag(
+                    "speech.end_reason",
+                    expired ? (endpoint.HasSpeechStarted ? "max_utterance" : "no_speech") : "cancelled");
+
+                if (expired && !endpoint.HasSpeechStarted)
+                {
+                    SpeechDiagnostics.Report(
+                        "dictation.no_speech",
+                        $"No speech was detected within {options.SilenceBeforeSpeechTimeout.TotalSeconds:0.#}s; the microphone was closed.");
+                }
+
                 await stop.CancelAsync().ConfigureAwait(false);
                 yield break;
             }

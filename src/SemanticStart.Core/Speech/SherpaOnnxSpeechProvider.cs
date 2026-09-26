@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace SemanticStart.Core.Speech;
@@ -59,12 +60,32 @@ public sealed class SherpaOnnxSpeechProvider : ISpeechTranscriberProvider
         IProgress<double>? downloadProgress = null,
         CancellationToken cancellationToken = default)
     {
+        using var activity = SpeechDiagnostics.StartActivity(SpeechDiagnostics.EngineStartActivity);
+        activity?.SetTag("speech.provider", ProviderId);
+        activity?.SetTag("speech.model", SpeechModelBootstrapper.ModelId);
+
         var files = await _models.EnsureAsync(downloadProgress, cancellationToken).ConfigureAwait(false);
 
         // Constructing the recognizer opens three ONNX sessions and is the slow part of startup,
-        // which is exactly why it happens here, once, rather than on the dictation hotkey.
-        return await Task.Run(
-            () => (ISpeechTranscriber)new SherpaOnnxSpeechTranscriber(files, Metadata),
-            cancellationToken).ConfigureAwait(false);
+        // which is exactly why it happens here, once, rather than on the dictation hotkey. The
+        // span around it is how "the tray icon took ages to come up" gets attributed.
+        var loading = Stopwatch.StartNew();
+        try
+        {
+            var transcriber = await Task.Run(
+                () => (ISpeechTranscriber)new SherpaOnnxSpeechTranscriber(files, Metadata),
+                cancellationToken).ConfigureAwait(false);
+
+            activity?.SetTag("speech.model_load_ms", loading.Elapsed.TotalMilliseconds);
+            return transcriber;
+        }
+        catch (Exception ex)
+        {
+            // Loading the model is a native call into sherpa-onnx, and a failure there is usually
+            // a missing or mismatched onnxruntime rather than anything about the audio. Recording
+            // the type before it is rethrown keeps that distinction in the trace.
+            activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
+            throw;
+        }
     }
 }
