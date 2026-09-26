@@ -84,7 +84,12 @@ public sealed class SherpaOnnxSpeechTranscriber : ISpeechTranscriber
         while (_recognizer.IsReady(stream))
             _recognizer.Decode(stream);
 
-        yield return new FinalTranscript(SpeechTextFormatter.Format(_recognizer.GetResult(stream).Text));
+        // An utterance that produced no words yields nothing at all rather than an empty final:
+        // an empty transcript is not a result, and downstream it would clear or re-space a query
+        // the user never spoke into.
+        var final = SpeechTextFormatter.Format(_recognizer.GetResult(stream).Text);
+        if (final.Length > 0)
+            yield return new FinalTranscript(final);
     }
 
     public void Dispose()

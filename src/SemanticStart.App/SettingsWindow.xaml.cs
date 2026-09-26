@@ -13,6 +13,13 @@ public partial class SettingsWindow : Window
     private readonly ActivationManager _activationManager;
     private readonly IndexRebuildCoordinator _rebuilds;
     private readonly DictationController? _dictation;
+
+    /// <summary>
+    /// One bootstrapper for the window's lifetime. Each instance owns an <see cref="HttpClient"/>,
+    /// and the status line asks about the model often enough that allocating one per question is a
+    /// socket leak in slow motion.
+    /// </summary>
+    private readonly SpeechModelBootstrapper _speechModels = new();
     private CancellationTokenSource? _modelDownload;
     private AppSettings _settings;
     private bool _dirty;
@@ -343,7 +350,7 @@ public partial class SettingsWindow : Window
 
     private async Task DownloadSpeechModelAsync()
     {
-        var models = new SpeechModelBootstrapper();
+        var models = _speechModels;
         if (models.IsDownloaded)
         {
             UpdateDictationStatus();
@@ -388,9 +395,9 @@ public partial class SettingsWindow : Window
 
     private void CancelSpeechModelDownload()
     {
-        var download = _modelDownload;
-        _modelDownload = null;
-        download?.Cancel();
+        // Left in place for the download's own finally to clear and dispose: clearing it here
+        // would make that cleanup skip the source it was asked to cancel.
+        _modelDownload?.Cancel();
         DictationProgress.Visibility = Visibility.Collapsed;
     }
 
@@ -417,7 +424,7 @@ public partial class SettingsWindow : Window
         };
 
         if (_modelDownload is null)
-            DictationStatus.Text = new SpeechModelBootstrapper().IsDownloaded
+            DictationStatus.Text = _speechModels.IsDownloaded
                 ? "Speech model ready."
                 : "The speech model will be downloaded when dictation is first used.";
     }

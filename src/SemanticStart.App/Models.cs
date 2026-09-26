@@ -401,7 +401,7 @@ public sealed class OverlayViewModel : ObservableObject
     public async Task ApplyFinalTranscriptAsync(string text, CancellationToken cancellationToken = default)
     {
         Query = _dictationPrefix + text;
-        _dictationPrefix = Query.Length == 0 ? string.Empty : Query + " ";
+        _dictationPrefix = Query.Length == 0 ? string.Empty : Query.TrimEnd() + " ";
         await FlushPendingSearchAsync(cancellationToken);
     }
 

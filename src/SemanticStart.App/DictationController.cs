@@ -110,12 +110,10 @@ public sealed class DictationController : IDisposable
     {
         StopPushToTalkPolling();
 
-        var session = Interlocked.Exchange(ref _session, null);
-        if (session is null)
-            return;
-
-        session.Cancel();
-        session.Dispose();
+        // Cancelled but not disposed: the listening task is still holding this token, and
+        // disposing it underneath ONNX and the capture wrapper is how a cancellation turns into an
+        // ObjectDisposedException. RunSessionAsync's finally owns the disposal.
+        _session?.Cancel();
     }
 
     public void Dispose()

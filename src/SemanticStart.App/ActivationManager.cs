@@ -61,7 +61,9 @@ public sealed class ActivationManager : IDisposable
     }
 
     /// <summary>
-    /// Whether the dictation chord is still physically down, for push-to-talk.
+    /// Whether the dictation chord's main key is still physically down, for push-to-talk. The
+    /// modifiers are not polled: a chord is released by letting the whole thing go, and treating an
+    /// early release of Win or Alt as the end of the utterance would cut people off mid-word.
     ///
     /// RegisterHotKey reports presses only - there is no WM_HOTKEY on release - so holding a key
     /// cannot be observed through it at all. The honest alternatives are a WH_KEYBOARD_LL hook,
