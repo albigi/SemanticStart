@@ -59,6 +59,10 @@ First launch builds the index and downloads the embedding model once — see [Us
   <img alt="Indexing runs offline: collectors, enrichment, synthesis and embeddings build index.sqlite. Querying is local: Win+Alt+. runs a vector arm and a lexical BM25 arm in parallel over that index, fused by RRF into the overlay." src="docs/pipeline-light.svg">
 </picture>
 
+A code-level companion to this section — projects, folders, and what calls what — is in
+[`docs/architecture.md`](docs/architecture.md), with dictation broken out separately in
+[`docs/architecture-speech.md`](docs/architecture-speech.md).
+
 **Indexing (offline).** Ten collectors enumerate what is on the machine, in this order — the order
 is deduplication precedence, so an earlier source wins when the same thing is found twice:
 
@@ -265,7 +269,8 @@ Known limitations:
   **Let desktop apps access your microphone** - rather than simply transcribing nothing.
 
 `benchmarks/DictationLatencyProbe` measures microphone-to-first-partial and microphone-to-final
-latency on real hardware; see its README.
+latency on real hardware; see its README. The types involved, the startup and per-utterance paths,
+and the failure paths are drawn out in [`docs/architecture-speech.md`](docs/architecture-speech.md).
 
 Dictation logs to the same `%LOCALAPPDATA%\SemanticStart\logs\app.log` as the rest of the app, and
 adds `TRACE` lines with the timings that matter: how long the model took to load, how long until the
@@ -470,6 +475,7 @@ data: it lives in `%LOCALAPPDATA%\SemanticStart` and is ignored by source contro
 | `tests/SemanticStart.Tests` | Unit and regression tests |
 | `tools/make-icon.ps1` | Redraws the app icon (`src/SemanticStart.App/Assets/SemanticStart.ico`) |
 | `benchmarks/DictationLatencyProbe` | Measures dictation latency on real hardware (not in the solution) |
+| `docs/architecture.md` | Code-level map of the solution, with [dictation](docs/architecture-speech.md) broken out |
 
 The icon is generated rather than drawn by hand so that every size in the `.ico` is rendered at its
 own resolution — a 16px tray icon resampled from a big bitmap loses the magnifier's ring. Run the
