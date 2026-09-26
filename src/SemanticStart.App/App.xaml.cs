@@ -10,6 +10,7 @@ public partial class App : System.Windows.Application
     private OverlayViewModel? _overlayViewModel;
     private OverlayWindow? _overlayWindow;
     private ActivationManager? _activationManager;
+    private DictationController? _dictation;
     private TrayIconService? _trayIconService;
     private IndexRebuildCoordinator? _rebuilds;
     private IndexRefreshScheduler? _refreshScheduler;
@@ -69,8 +70,22 @@ public partial class App : System.Windows.Application
         _overlayWindow.Hide();
         _overlayWindow.SettingsRequested = () => ShowSettingsWindow();
 
-        _activationManager = new ActivationManager(_overlayWindow.Dispatcher, () => _overlayWindow.ShowOverlay(), settings);
+        _dictation = new DictationController(
+            _overlayWindow.Dispatcher,
+            _overlayViewModel,
+            settings,
+            () => _activationManager?.IsDictationHotKeyHeld() ?? false,
+            () => _overlayWindow.ShowOverlay());
+        _overlayWindow.DictationRequested = () => _dictation.Toggle();
+        _overlayWindow.DictationStopRequested = () => _dictation.Stop();
+
+        _activationManager = new ActivationManager(
+            _overlayWindow.Dispatcher,
+            () => _overlayWindow.ShowOverlay(),
+            settings,
+            () => _dictation.Toggle());
         _activationManager.HotKeyRegistered += OnHotKeyRegistered;
+        _activationManager.DictationHotKeyRegistered += OnDictationHotKeyRegistered;
         _activationManager.Start();
         _trayIconService = new TrayIconService(_overlayWindow, () => ShowSettingsWindow(), () => RebuildIndexFromTrayAsync(), () => Shutdown(), settings);
 
@@ -82,6 +97,10 @@ public partial class App : System.Windows.Application
             _rebuilds,
             () => _overlayWindow?.IsOpen ?? false);
         _refreshScheduler.Start();
+
+        // The recogniser is loaded now rather than on the first press of the dictation hotkey:
+        // model load is the expensive part and it must not be paid by someone mid-sentence.
+        _ = _dictation.WarmStartAsync();
 
         _ = WarmStartAsync(settings);
     }
@@ -124,6 +143,22 @@ public partial class App : System.Windows.Application
         var message = hotKey is null
             ? "No hotkey could be registered because every candidate is already in use. Open SemanticStart from the tray icon, then pick a free hotkey in Settings."
             : $"Your preferred hotkey was already taken by another app, so SemanticStart is using {hotKey} instead. You can change this in Settings.";
+
+        Dispatcher.BeginInvoke(new Action(() => _trayIconService?.ShowMessage("SemanticStart", message)));
+    }
+
+    /// <summary>
+    /// The same report for the dictation chord. Quieter than the activation one: dictation is an
+    /// alternative way to type, so losing its hotkey is an inconvenience rather than a dead app.
+    /// </summary>
+    private void OnDictationHotKeyRegistered(string? hotKey, bool differsFromRequested)
+    {
+        if (!differsFromRequested)
+            return;
+
+        var message = hotKey is null
+            ? "No dictation hotkey could be registered because every candidate is already in use. You can pick a free one in Settings."
+            : $"Your preferred dictation hotkey was already taken by another app, so SemanticStart is using {hotKey} instead.";
 
         Dispatcher.BeginInvoke(new Action(() => _trayIconService?.ShowMessage("SemanticStart", message)));
     }
@@ -196,6 +231,7 @@ public partial class App : System.Windows.Application
         _refreshScheduler?.Dispose();
         _rebuilds?.Dispose();
         _activationManager?.Dispose();
+        _dictation?.Dispose();
         _searchService?.Dispose();
         _shuttingDown = true;
         _activateSignal?.Dispose();
@@ -272,7 +308,7 @@ public partial class App : System.Windows.Application
             // Until the first build, every way into settings is a way into setup, so the page leads
             // with Build index wherever the user opened it from.
             var setupMode = !_settingsService.Load().SetupCompleted && _searchService.Count == 0 && !_rebuilds.IsRunning;
-            _settingsWindow = new SettingsWindow(_settingsService, _searchService, _activationManager, _rebuilds, setupMode);
+            _settingsWindow = new SettingsWindow(_settingsService, _searchService, _activationManager, _rebuilds, setupMode, _dictation);
             _settingsWindow.Closed += (_, _) => _settingsWindow = null;
             _settingsWindow.Show();
         }

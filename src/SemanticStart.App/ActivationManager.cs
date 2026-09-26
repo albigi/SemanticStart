@@ -21,10 +21,19 @@ public sealed class ActivationManager : IDisposable
     private const int ModAlt = 0x0001;
     private const int ModNoRepeat = 0x4000;
     private const int HotKeyId = 1;
+
+    /// <summary>
+    /// The dictation chord's id. 2 is skipped because the probe below registers HotKeyId + 1 to
+    /// tell an id clash apart from a chord clash.
+    /// </summary>
+    private const int DictationHotKeyId = 3;
     private const int ErrorHotKeyAlreadyRegistered = 1409;
 
     /// <summary>The hotkey actually registered, which may differ from the configured one.</summary>
     public string? ActiveHotKey { get; private set; }
+
+    /// <summary>The dictation hotkey actually registered, or null if none could be.</summary>
+    public string? ActiveDictationHotKey { get; private set; }
 
     /// <summary>
     /// Raised after registration with the hotkey in force and whether it differs from what the
@@ -32,18 +41,38 @@ public sealed class ActivationManager : IDisposable
     /// </summary>
     public event Action<string?, bool>? HotKeyRegistered;
 
+    /// <summary>The same report for the dictation chord. Not raised when dictation is off.</summary>
+    public event Action<string?, bool>? DictationHotKeyRegistered;
+
     private readonly Dispatcher _dispatcher;
     private readonly Action _activate;
+    private readonly Action? _activateDictation;
     private AppSettings _settings;
     private HwndSource? _source;
+    private HotKeySpec? _dictationSpec;
     private bool _disposed;
 
-    public ActivationManager(Dispatcher dispatcher, Action activate, AppSettings settings)
+    public ActivationManager(Dispatcher dispatcher, Action activate, AppSettings settings, Action? activateDictation = null)
     {
         _dispatcher = dispatcher;
         _activate = activate;
         _settings = settings;
+        _activateDictation = activateDictation;
     }
+
+    /// <summary>
+    /// Whether the dictation chord is still physically down, for push-to-talk.
+    ///
+    /// RegisterHotKey reports presses only - there is no WM_HOTKEY on release - so holding a key
+    /// cannot be observed through it at all. The honest alternatives are a WH_KEYBOARD_LL hook,
+    /// which this class exists to avoid, or asking the keyboard for its current state, which is
+    /// what this does. It is a read, not an interception: nothing is inserted into anyone's input
+    /// path. The cost is that release is noticed on the next poll rather than at the instant it
+    /// happens, and that a key already released before listening began reads as released, which is
+    /// the safe direction to be wrong in.
+    /// </summary>
+    public bool IsDictationHotKeyHeld()
+        => _dictationSpec is { } spec && (GetAsyncKeyState(spec.VirtualKey) & 0x8000) != 0;
 
     public void Start()
     {
@@ -95,12 +124,22 @@ public sealed class ActivationManager : IDisposable
         _dispatcher.BeginInvoke(_activate, DispatcherPriority.Normal);
     }
 
+    private void ActivateDictationSoon()
+    {
+        if (_disposed || _activateDictation is null)
+            return;
+        _dispatcher.BeginInvoke(_activateDictation, DispatcherPriority.Normal);
+    }
+
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (msg == WmHotKey)
         {
             handled = true;
-            ActivateSoon();
+            if ((int)wParam == DictationHotKeyId)
+                ActivateDictationSoon();
+            else
+                ActivateSoon();
         }
         return IntPtr.Zero;
     }
@@ -126,6 +165,7 @@ public sealed class ActivationManager : IDisposable
                 HotKeyRegistered?.Invoke(candidate, !string.Equals(candidate, _settings.HotKey, StringComparison.OrdinalIgnoreCase));
                 if (!string.Equals(candidate, _settings.HotKey, StringComparison.OrdinalIgnoreCase))
                     Log.Info($"{_settings.HotKey} was unavailable; registered {candidate} instead.");
+                RegisterDictationHotKey(handle);
                 return;
             }
 
@@ -149,6 +189,71 @@ public sealed class ActivationManager : IDisposable
         ActiveHotKey = null;
         HotKeyRegistered?.Invoke(null, true);
         Log.Info("No hotkey could be registered; use the tray icon to open SemanticStart.");
+        RegisterDictationHotKey(handle);
+    }
+
+    /// <summary>
+    /// Registers the dictation chord on its own id, with its own fallback chain, so a contended
+    /// dictation chord costs dictation only and never the activation hotkey.
+    /// </summary>
+    private void RegisterDictationHotKey(IntPtr handle)
+    {
+        _dictationSpec = null;
+        ActiveDictationHotKey = null;
+
+        if (!_settings.DictationEnabled || _activateDictation is null)
+            return;
+
+        foreach (var candidate in CandidateDictationHotKeys())
+        {
+            if (!HotKeySpec.TryParse(candidate, out var spec, out _) || spec is null)
+                continue;
+
+            if (RegisterHotKey(handle, DictationHotKeyId, spec.Modifiers | ModNoRepeat, spec.VirtualKey))
+            {
+                _dictationSpec = spec;
+                ActiveDictationHotKey = candidate;
+                var substituted = !string.Equals(candidate, _settings.DictationHotKey, StringComparison.OrdinalIgnoreCase);
+                Log.Info($"Registered dictation hotkey {candidate} (mod=0x{spec.Modifiers:X}, vk=0x{spec.VirtualKey:X}).");
+                if (substituted)
+                    Log.Info($"{_settings.DictationHotKey} was unavailable; registered {candidate} for dictation instead.");
+                DictationHotKeyRegistered?.Invoke(candidate, substituted);
+                return;
+            }
+
+            Log.Info($"RegisterHotKey failed for dictation chord {candidate}; Win32={Marshal.GetLastWin32Error()}");
+        }
+
+        DictationHotKeyRegistered?.Invoke(null, true);
+        Log.Info("No dictation hotkey could be registered; start dictation from the overlay instead.");
+    }
+
+    /// <summary>
+    /// The dictation equivalent of <see cref="CandidateHotKeys"/>. The same Win+Alt+Space exclusion
+    /// applies, and none of these may be the activation chord: registering both on one combination
+    /// would leave whichever id lost the race permanently dead.
+    /// </summary>
+    private IEnumerable<string> CandidateDictationHotKeys()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (ActiveHotKey is { } active)
+            seen.Add(active);
+        seen.Add(_settings.HotKey);
+
+        foreach (var candidate in new[]
+                 {
+                     _settings.DictationHotKey,
+                     AppSettings.DefaultDictationHotKey,
+                     "Win+Alt+'",
+                     "Win+Ctrl+/",
+                     "Win+Alt+M",
+                     "Ctrl+Alt+/",
+                     "Ctrl+Shift+/",
+                 })
+        {
+            if (!string.IsNullOrWhiteSpace(candidate) && seen.Add(candidate))
+                yield return candidate;
+        }
     }
 
     /// <summary>
@@ -180,7 +285,13 @@ public sealed class ActivationManager : IDisposable
     private void UnregisterHotKey()
     {
         if (_source?.Handle is { } handle && handle != IntPtr.Zero)
+        {
             UnregisterHotKey(handle, HotKeyId);
+            UnregisterHotKey(handle, DictationHotKeyId);
+        }
+
+        _dictationSpec = null;
+        ActiveDictationHotKey = null;
     }
 
     /// <summary>
@@ -204,4 +315,7 @@ public sealed class ActivationManager : IDisposable
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 }

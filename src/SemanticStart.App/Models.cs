@@ -260,6 +260,9 @@ public sealed class OverlayViewModel : ObservableObject
     /// </summary>
     internal const string EmptyIndexStatus = "The index hasn't been built yet. Open Settings from the tray icon and choose Build index.";
 
+    /// <summary>Shown while the microphone is open, so an idle recogniser is never mistaken for a dead one.</summary>
+    internal const string ListeningStatus = "Listening\u2026";
+
     private readonly SemanticSearchService _searchService;
     private readonly IconProvider _iconProvider;
     private readonly AppSettings _settings;
@@ -276,6 +279,14 @@ public sealed class OverlayViewModel : ObservableObject
     private int _selectedIndex = -1;
     private bool _isSearching;
     private bool _isResultsActive;
+    private bool _isListening;
+    private double _microphoneLevel;
+
+    /// <summary>
+    /// Text that was in the box when dictation started. Partial transcripts replace each other,
+    /// but they must not eat what the user typed first.
+    /// </summary>
+    private string _dictationPrefix = string.Empty;
 
     public OverlayViewModel(SemanticSearchService searchService, IconProvider iconProvider, AppSettings settings)
     {
@@ -344,6 +355,68 @@ public sealed class OverlayViewModel : ObservableObject
         get => _isSearching;
         private set => SetProperty(ref _isSearching, value);
     }
+
+    /// <summary>Whether the microphone is open and speech is being transcribed right now.</summary>
+    public bool IsListening
+    {
+        get => _isListening;
+        private set => SetProperty(ref _isListening, value);
+    }
+
+    /// <summary>
+    /// Loudness of the captured audio, 0 to 1, for the level meter. Without it a silent failure -
+    /// a muted device, the wrong default endpoint - looks exactly like a user who has not spoken.
+    /// </summary>
+    public double MicrophoneLevel
+    {
+        get => _microphoneLevel;
+        private set => SetProperty(ref _microphoneLevel, value);
+    }
+
+    /// <summary>
+    /// Opens a dictation turn. Whatever is already in the box is kept and spoken words are added
+    /// after it, so dictating is an edit to the query rather than a replacement of it.
+    /// </summary>
+    public void BeginDictation()
+    {
+        _dictationPrefix = string.IsNullOrWhiteSpace(Query) ? string.Empty : Query.TrimEnd() + " ";
+        MicrophoneLevel = 0;
+        IsListening = true;
+        Status = ListeningStatus;
+    }
+
+    /// <summary>
+    /// A transcript that is still being revised. It goes through the ordinary Query setter, so the
+    /// debouncer decides when to search exactly as it does for typing - the engine emits partials
+    /// every few hundred milliseconds and searching each one would spend the machine on text the
+    /// recogniser is about to change.
+    /// </summary>
+    public void ApplyPartialTranscript(string text) => Query = _dictationPrefix + text;
+
+    /// <summary>
+    /// The recogniser's settled text for an utterance. This one is worth searching immediately:
+    /// the user has stopped speaking and is waiting for the answer, so the debounce interval would
+    /// be pure dead time.
+    /// </summary>
+    public async Task ApplyFinalTranscriptAsync(string text, CancellationToken cancellationToken = default)
+    {
+        Query = _dictationPrefix + text;
+        _dictationPrefix = Query.Length == 0 ? string.Empty : Query + " ";
+        await FlushPendingSearchAsync(cancellationToken);
+    }
+
+    /// <summary>Closes a dictation turn, optionally with a message explaining why it ended.</summary>
+    public void EndDictation(string? message = null)
+    {
+        IsListening = false;
+        MicrophoneLevel = 0;
+        if (message is not null)
+            Status = message;
+        else if (string.Equals(Status, ListeningStatus, StringComparison.Ordinal))
+            Status = Results.Count == 0 && Query.Length == 0 ? IdleStatus : string.Empty;
+    }
+
+    public void ReportMicrophoneLevel(double level) => MicrophoneLevel = Math.Clamp(level, 0, 1);
 
     public async Task SearchNowAsync(string query, CancellationToken cancellationToken)
     {
@@ -415,6 +488,7 @@ public sealed class OverlayViewModel : ObservableObject
     {
         _debouncer.Cancel();
         _query = string.Empty;
+        _dictationPrefix = string.Empty;
         OnPropertyChanged(nameof(Query));
         Results.Clear();
         _resultsQuery = string.Empty;
