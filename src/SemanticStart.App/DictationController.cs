@@ -33,6 +33,25 @@ public sealed class DictationController : IDisposable
     private readonly OverlayViewModel _viewModel;
     private readonly Func<bool> _isHotKeyHeld;
     private readonly Action _showOverlay;
+    /// <summary>
+    /// Admits one start at a time, and only one.
+    ///
+    /// <para>
+    /// A semaphore rather than a lock because starting is asynchronous: it may await the first
+    /// model load, and a <c>lock</c> cannot be held across an await. It is used with
+    /// <c>WaitAsync(0)</c>, which returns false rather than waiting, so this is a non-blocking
+    /// mutex, not a queue - a second hotkey press while a start is still in flight is dropped on
+    /// the spot and nothing is buffered to run afterwards.
+    /// </para>
+    /// <para>
+    /// That is deliberate for the first press of a session, when the warm start may still be
+    /// loading the engine or downloading the model: queueing would mean a press, a long silence,
+    /// and then the microphone opening by itself once the download finished, which is the one
+    /// behaviour a microphone must never have. Toggling off is not gated by it - the stop path
+    /// cancels the session directly - so a press during startup is a no-op, not a lost toggle, and
+    /// the user is never left out of sync with the indicator.
+    /// </para>
+    /// </summary>
     private readonly SemaphoreSlim _startGate = new(1, 1);
 
     /// <summary>

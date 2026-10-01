@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
@@ -32,14 +31,19 @@ namespace SemanticStart.Core.Speech;
 public sealed class WasapiMicrophoneCapture : IAudioCaptureSource
 {
     /// <summary>
-    /// Requested capture period. 20 ms is short enough not to dominate the latency budget and
-    /// long enough to survive an ordinary scheduling hiccup without dropping packets.
+    /// Requested capture period, passed to <see cref="WasapiCapture"/>'s
+    /// <c>audioBufferMillisecondsLength</c> and from there to <c>IAudioClient::Initialize</c> as
+    /// <c>hnsBufferDuration</c>. 20 ms is short enough not to dominate the latency budget and long
+    /// enough to survive an ordinary scheduling hiccup without dropping packets.
+    ///
+    /// <para>
+    /// It is a request, not a setting. In shared mode the audio engine rounds up to its own period
+    /// - documented as typically 10 ms on current Windows, which is why asking for less than that
+    /// buys nothing - so the effective buffer is max(request, engine period). The value that is
+    /// actually in force is the device mix format recorded on the capture span.
+    /// </para>
     /// </summary>
     private const int BufferMilliseconds = 20;
-
-    private const int AccessDenied = unchecked((int)0x80070005);
-    private const int AudioClientDeviceInvalidated = unchecked((int)0x88890004);
-    private const int NotFound = unchecked((int)0x80070490);
 
     private bool _disposed;
 
@@ -65,6 +69,14 @@ public sealed class WasapiMicrophoneCapture : IAudioCaptureSource
         activity?.SetTag("audio.device.bits_per_sample", format.BitsPerSample);
         activity?.SetTag("audio.device.encoding", format.Encoding.ToString());
 
+        // Both counters are written from WASAPI's capture thread and read from whichever thread
+        // enumerates this method, so every access goes through Interlocked. They are locals rather
+        // than fields because they belong to one capture session - a second CaptureAsync on the
+        // same instance would otherwise share them - and a local captured by a closure is a field
+        // on a compiler-generated class, so Interlocked applies to it exactly as it would to one
+        // declared by hand. The handlers below are callbacks: NAudio raises DataAvailable on the
+        // capture thread, and the itemDropped callback runs on whichever thread wrote the item
+        // that displaced an older one, which is that same thread.
         var captured = 0L;
         var dropped = 0L;
 
@@ -89,13 +101,20 @@ public sealed class WasapiMicrophoneCapture : IAudioCaptureSource
             if (args.BytesRecorded <= 0)
                 return;
 
-            var samples = ToFloatSamples(args.Buffer, args.BytesRecorded, format);
+            var samples = WasapiCaptureInterop.ToFloatSamples(args.Buffer, args.BytesRecorded, format);
             var converted = resampler.Resample(samples);
             if (converted.Length == 0)
                 return;
 
-            captured += converted.Length;
-            channel.Writer.TryWrite(converted);
+            Interlocked.Add(ref captured, converted.Length);
+
+            // TryWrite cannot fail for a full channel here - DropOldest evicts instead, and that
+            // eviction is what itemDropped counts. It can still return false once the channel has
+            // been completed, which happens when the capture thread stops while a final buffer is
+            // in flight. That buffer is audio the user spoke that nothing will ever transcribe, so
+            // it is counted with the rest rather than disappearing.
+            if (!channel.Writer.TryWrite(converted))
+                Interlocked.Increment(ref dropped);
         }
 
         void OnRecordingStopped(object? sender, StoppedEventArgs args)
@@ -106,7 +125,7 @@ public sealed class WasapiMicrophoneCapture : IAudioCaptureSource
             if (args.Exception is { } ex)
                 SpeechDiagnostics.ReportFailure("capture.thread", "The microphone capture thread stopped with an error.", ex);
 
-            channel.Writer.TryComplete(args.Exception is { } failure ? Describe(failure) : null);
+            channel.Writer.TryComplete(args.Exception is { } failure ? WasapiCaptureInterop.Describe(failure) : null);
         }
 
         capture.DataAvailable += OnDataAvailable;
@@ -120,7 +139,7 @@ public sealed class WasapiMicrophoneCapture : IAudioCaptureSource
             }
             catch (Exception ex)
             {
-                throw Describe(ex);
+                throw WasapiCaptureInterop.Describe(ex);
             }
 
             await foreach (var buffer in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
@@ -131,14 +150,15 @@ public sealed class WasapiMicrophoneCapture : IAudioCaptureSource
             capture.DataAvailable -= OnDataAvailable;
             capture.RecordingStopped -= OnRecordingStopped;
 
-            activity?.SetTag("audio.samples_captured", captured);
-            activity?.SetTag("audio.buffers_dropped", Interlocked.Read(ref dropped));
+            var droppedBuffers = Interlocked.Read(ref dropped);
+            activity?.SetTag("audio.samples_captured", Interlocked.Read(ref captured));
+            activity?.SetTag("audio.buffers_dropped", droppedBuffers);
 
-            if (Interlocked.Read(ref dropped) > 0)
+            if (droppedBuffers > 0)
             {
                 SpeechDiagnostics.Report(
                     "capture.dropped",
-                    $"The transcriber fell behind the microphone and {Interlocked.Read(ref dropped)} buffer(s) were dropped.");
+                    $"The transcriber fell behind the microphone and {droppedBuffers} buffer(s) were dropped.");
             }
 
             try
@@ -181,61 +201,7 @@ public sealed class WasapiMicrophoneCapture : IAudioCaptureSource
         }
         catch (Exception ex)
         {
-            throw Describe(ex);
+            throw WasapiCaptureInterop.Describe(ex);
         }
-    }
-
-    /// <summary>
-    /// Turns a WASAPI failure into something the user can act on. The HRESULTs are the ones that
-    /// distinguish "you have not allowed this" from "there is nothing to record with", which are
-    /// the two cases with different fixes.
-    /// </summary>
-    internal static MicrophoneUnavailableException Describe(Exception exception)
-    {
-        if (exception is MicrophoneUnavailableException microphone)
-            return microphone;
-
-        var failure = exception switch
-        {
-            UnauthorizedAccessException => MicrophoneFailure.AccessDenied,
-            COMException { ErrorCode: AccessDenied } => MicrophoneFailure.AccessDenied,
-            COMException { ErrorCode: NotFound } => MicrophoneFailure.NoDevice,
-            COMException { ErrorCode: AudioClientDeviceInvalidated } => MicrophoneFailure.NoDevice,
-            ArgumentException => MicrophoneFailure.NoDevice,
-            _ => MicrophoneFailure.DeviceError,
-        };
-
-        return new MicrophoneUnavailableException(
-            failure,
-            MicrophoneUnavailableException.DescribeFailure(failure),
-            exception);
-    }
-
-    /// <summary>
-    /// Reads one capture buffer as floats. Shared mode hands over the audio engine's mix format,
-    /// which is float on every machine seen so far but is not promised to be, so 16-bit PCM is
-    /// handled rather than assumed away.
-    /// </summary>
-    internal static float[] ToFloatSamples(byte[] buffer, int bytesRecorded, WaveFormat format)
-    {
-        if (format.Encoding == WaveFormatEncoding.IeeeFloat && format.BitsPerSample == 32)
-        {
-            var samples = new float[bytesRecorded / sizeof(float)];
-            Buffer.BlockCopy(buffer, 0, samples, 0, samples.Length * sizeof(float));
-            return samples;
-        }
-
-        if (format.BitsPerSample == 16)
-        {
-            var samples = new float[bytesRecorded / sizeof(short)];
-            for (var i = 0; i < samples.Length; i++)
-                samples[i] = BitConverter.ToInt16(buffer, i * sizeof(short)) / 32768f;
-
-            return samples;
-        }
-
-        throw new MicrophoneUnavailableException(
-            MicrophoneFailure.DeviceError,
-            $"The microphone's format ({format.Encoding}, {format.BitsPerSample}-bit) is not supported.");
     }
 }

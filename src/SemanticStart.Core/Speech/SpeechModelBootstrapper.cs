@@ -48,30 +48,12 @@ namespace SemanticStart.Core.Speech;
 /// </summary>
 public sealed class SpeechModelBootstrapper
 {
-    public const string ModelId = "sherpa-onnx-streaming-zipformer-en-2023-06-26";
-
-    private const string ModelBaseUrl =
-        "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/";
-
-    public const string DefaultEncoderUrl = ModelBaseUrl + "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
-    public const string DefaultDecoderUrl = ModelBaseUrl + "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
-    public const string DefaultJoinerUrl = ModelBaseUrl + "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
-    public const string DefaultTokensUrl = ModelBaseUrl + "tokens.txt";
-
-    public const string DefaultVadUrl =
-        "https://raw.githubusercontent.com/snakers4/silero-vad/v5.1/src/silero_vad/data/silero_vad.onnx";
-
-    /// <summary>SHA-256 of silero_vad.onnx at tag v5.1.</summary>
-    public const string VadSha256 = "2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f";
-
-    /// <summary>What the user is told they are about to download, before it starts.</summary>
-    public const long ApproximateDownloadBytes = 75L * 1024 * 1024;
-
-    private const long MinimumEncoderBytes = 50_000_000;
-    private const long MinimumDecoderBytes = 500_000;
-    private const long MinimumJoinerBytes = 100_000;
-    private const long MinimumTokensBytes = 1_000;
-    private const long MinimumVadBytes = 1_000_000;
+    /// <summary>
+    /// What the user is told they are about to download, before it starts. Static because the
+    /// settings page asks before any bootstrapper exists; an override file changes the instance's
+    /// <see cref="Options"/>, and the figure shown is refreshed from there once one is built.
+    /// </summary>
+    public static long ApproximateDownloadBytes => SpeechModelOptions.Default.ApproximateDownloadBytes;
 
     /// <summary>
     /// Shared by every bootstrapper that is not handed a client of its own. The settings window,
@@ -84,19 +66,28 @@ public sealed class SpeechModelBootstrapper
     private readonly HttpClient _httpClient;
     private readonly string _modelsDirectory;
 
-    public SpeechModelBootstrapper(HttpClient? httpClient = null, string? modelsDirectory = null)
+    public SpeechModelBootstrapper(
+        HttpClient? httpClient = null,
+        string? modelsDirectory = null,
+        SpeechModelOptions? options = null)
     {
         _httpClient = httpClient ?? SharedHttpClient;
         _modelsDirectory = modelsDirectory ?? AppPaths.ModelsDirectory;
+        Options = options ?? SpeechModelOptions.Load();
     }
 
-    public string EncoderPath => Path.Combine(_modelsDirectory, ModelId + "-encoder.int8.onnx");
+    /// <summary>Where the files come from and how small is too small. See <see cref="SpeechModelOptions"/>.</summary>
+    public SpeechModelOptions Options { get; }
 
-    public string DecoderPath => Path.Combine(_modelsDirectory, ModelId + "-decoder.int8.onnx");
+    public string ModelId => Options.ModelId;
 
-    public string JoinerPath => Path.Combine(_modelsDirectory, ModelId + "-joiner.int8.onnx");
+    public string EncoderPath => Path.Combine(_modelsDirectory, Options.ModelId + "-encoder.int8.onnx");
 
-    public string TokensPath => Path.Combine(_modelsDirectory, ModelId + "-tokens.txt");
+    public string DecoderPath => Path.Combine(_modelsDirectory, Options.ModelId + "-decoder.int8.onnx");
+
+    public string JoinerPath => Path.Combine(_modelsDirectory, Options.ModelId + "-joiner.int8.onnx");
+
+    public string TokensPath => Path.Combine(_modelsDirectory, Options.ModelId + "-tokens.txt");
 
     public string VadPath => Path.Combine(_modelsDirectory, "silero_vad.onnx");
 
@@ -105,11 +96,11 @@ public sealed class SpeechModelBootstrapper
     /// startup to decide whether loading the engine needs the user's consent first.
     /// </summary>
     public bool IsDownloaded =>
-        IsUsableFile(EncoderPath, MinimumEncoderBytes)
-        && IsUsableFile(DecoderPath, MinimumDecoderBytes)
-        && IsUsableFile(JoinerPath, MinimumJoinerBytes)
-        && IsUsableFile(TokensPath, MinimumTokensBytes)
-        && IsUsableFile(VadPath, MinimumVadBytes);
+        IsUsableFile(EncoderPath, Options.MinimumEncoderBytes)
+        && IsUsableFile(DecoderPath, Options.MinimumDecoderBytes)
+        && IsUsableFile(JoinerPath, Options.MinimumJoinerBytes)
+        && IsUsableFile(TokensPath, Options.MinimumTokensBytes)
+        && IsUsableFile(VadPath, Options.MinimumVadBytes);
 
     public async Task<SpeechModelFiles> EnsureAsync(
         IProgress<double>? progress = null,
@@ -119,16 +110,16 @@ public sealed class SpeechModelBootstrapper
         Directory.CreateDirectory(_modelsDirectory);
 
         using var activity = SpeechDiagnostics.StartActivity(SpeechDiagnostics.ModelEnsureActivity);
-        activity?.SetTag("speech.model", ModelId);
+        activity?.SetTag("speech.model", Options.ModelId);
         activity?.SetTag("speech.model.already_present", IsDownloaded);
 
         // Weighted by size so the bar moves at roughly a constant rate: the encoder is the
         // download, and the other three together are rounding error.
-        await DownloadIfNeededAsync(DefaultEncoderUrl, EncoderPath, MinimumEncoderBytes, null, ScaleProgress(progress, 0.0, 0.92), cancellationToken).ConfigureAwait(false);
-        await DownloadIfNeededAsync(DefaultDecoderUrl, DecoderPath, MinimumDecoderBytes, null, ScaleProgress(progress, 0.92, 0.94), cancellationToken).ConfigureAwait(false);
-        await DownloadIfNeededAsync(DefaultJoinerUrl, JoinerPath, MinimumJoinerBytes, null, ScaleProgress(progress, 0.94, 0.95), cancellationToken).ConfigureAwait(false);
-        await DownloadIfNeededAsync(DefaultTokensUrl, TokensPath, MinimumTokensBytes, null, ScaleProgress(progress, 0.95, 0.96), cancellationToken).ConfigureAwait(false);
-        await DownloadIfNeededAsync(DefaultVadUrl, VadPath, MinimumVadBytes, VadSha256, ScaleProgress(progress, 0.96, 1.0), cancellationToken).ConfigureAwait(false);
+        await DownloadIfNeededAsync(Options.EncoderUrl, EncoderPath, Options.MinimumEncoderBytes, null, ScaleProgress(progress, 0.0, 0.92), cancellationToken).ConfigureAwait(false);
+        await DownloadIfNeededAsync(Options.DecoderUrl, DecoderPath, Options.MinimumDecoderBytes, null, ScaleProgress(progress, 0.92, 0.94), cancellationToken).ConfigureAwait(false);
+        await DownloadIfNeededAsync(Options.JoinerUrl, JoinerPath, Options.MinimumJoinerBytes, null, ScaleProgress(progress, 0.94, 0.95), cancellationToken).ConfigureAwait(false);
+        await DownloadIfNeededAsync(Options.TokensUrl, TokensPath, Options.MinimumTokensBytes, null, ScaleProgress(progress, 0.95, 0.96), cancellationToken).ConfigureAwait(false);
+        await DownloadIfNeededAsync(Options.VadUrl, VadPath, Options.MinimumVadBytes, Options.VadSha256, ScaleProgress(progress, 0.96, 1.0), cancellationToken).ConfigureAwait(false);
         progress?.Report(1.0);
 
         return new SpeechModelFiles(EncoderPath, DecoderPath, JoinerPath, TokensPath, VadPath);
@@ -227,8 +218,57 @@ public sealed class SpeechModelBootstrapper
                 $"The file downloaded from {url} did not match its expected checksum and was discarded.");
         }
 
-        File.Move(tempPath, path, overwrite: true);
+        MoveIntoPlace(tempPath, path, activity);
         progress?.Report(1.0);
+    }
+
+    /// <summary>
+    /// Publishes a completed download under its final name, retrying briefly if the file is still
+    /// locked.
+    ///
+    /// <para>
+    /// Defender's real-time protection scans a file when the last handle on it closes, and an
+    /// on-access scan of a 60 MB model holds the file open for long enough that the move that
+    /// follows immediately can lose the race and fail with <see cref="IOException"/> or
+    /// <see cref="UnauthorizedAccessException"/>. The lock is transient, so a short backoff clears
+    /// it; a lock that outlasts the backoff is a real failure (a quarantined file, a locked
+    /// directory) and is reported rather than retried forever.
+    /// </para>
+    /// <para>
+    /// No unblocking is needed, and none is attempted. A Mark-of-the-Web -
+    /// the <c>Zone.Identifier</c> stream that <c>Unblock-File</c> removes - is written by the
+    /// Attachment Execution Service on behalf of browsers and mail clients, not by the file system,
+    /// so a file written here by <see cref="HttpClient"/> never carries one. Writing one of our own
+    /// would be adding the restriction, and clearing a mark we did not set would be the wrong thing
+    /// for this code to be doing.
+    /// </para>
+    /// </summary>
+    private static void MoveIntoPlace(string tempPath, string path, Activity? activity)
+    {
+        const int attempts = 5;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(tempPath, path, overwrite: true);
+                if (attempt > 1)
+                    activity?.SetTag("file.move_attempts", attempt);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < attempts)
+            {
+                Thread.Sleep(100 * attempt);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
+                TryDelete(tempPath);
+                throw new SpeechModelDownloadException(
+                    $"The speech model was downloaded but could not be moved to {path}. "
+                    + "Another process - commonly antivirus real-time scanning - is holding the file open.",
+                    ex);
+            }
+        }
     }
 
     internal static bool MatchesSha256(string path, string expected)
@@ -260,25 +300,5 @@ public sealed class SpeechModelBootstrapper
                 $"Could not delete the partial download at {path}.",
                 ex);
         }
-    }
-}
-
-public sealed record SpeechModelFiles(
-    string EncoderPath,
-    string DecoderPath,
-    string JoinerPath,
-    string TokensPath,
-    string VadPath);
-
-public sealed class SpeechModelDownloadException : Exception
-{
-    public SpeechModelDownloadException(string message)
-        : base(message)
-    {
-    }
-
-    public SpeechModelDownloadException(string message, Exception innerException)
-        : base(message, innerException)
-    {
     }
 }

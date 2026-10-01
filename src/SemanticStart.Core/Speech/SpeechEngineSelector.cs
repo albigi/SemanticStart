@@ -85,28 +85,3 @@ public sealed class SpeechEngineSelector(IReadOnlyList<ISpeechTranscriberProvide
         return new SpeechEngineStartupResult(null, null, rejected);
     }
 }
-
-public sealed record SpeechEngineChoice(ISpeechTranscriberProvider? Provider, IReadOnlyList<SpeechProviderRejection> Rejected)
-{
-    public bool IsAvailable => Provider is not null;
-}
-
-public sealed record SpeechEngineStartupResult(
-    ISpeechTranscriber? Transcriber,
-    SpeechProviderMetadata? Metadata,
-    IReadOnlyList<SpeechProviderRejection> Rejected)
-{
-    public bool IsAvailable => Transcriber is not null;
-
-    /// <summary>
-    /// One sentence naming the first thing that went wrong, for the status line. Null when an
-    /// engine was loaded.
-    /// </summary>
-    public string? FailureReason => IsAvailable
-        ? null
-        : Rejected.Count > 0
-            ? Rejected[0].Reason
-            : "No speech engine is configured.";
-}
-
-public sealed record SpeechProviderRejection(SpeechProviderMetadata Metadata, string Reason, Exception? Exception = null);

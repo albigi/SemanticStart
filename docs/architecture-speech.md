@@ -181,6 +181,7 @@ Two details in that diagram are load-bearing:
 | `SherpaOnnxSpeechTranscriber` | Streaming Zipformer decode | Its own endpointing is disabled — two endpoint rules would race |
 | `DictationEngine` | Wires the above into one turn | Long-lived and warm; `ListenAsync` loads nothing |
 | `SpeechModelBootstrapper` | Fetches models on first use | Mirrors `EmbeddingModelBootstrapper`: same temp file, progress and size floors |
+| `SpeechModelOptions` | Where the models come from | Holds every URL, checksum and size floor, so a mirror or a newer revision is a `speech-model.json` away rather than a rebuild |
 | `SpeechDiagnostics` | Spans + everything handled internally | Keeps Core log-free while making swallowed failures visible |
 | `DictationController` | Hotkey → overlay, session lifetime | The only place that knows about both `Dispatcher` and `DictationEngine` |
 | `SpeechTelemetry` | The one `ActivityListener` | Turns Core's spans into `TRACE` lines in the app's existing log |

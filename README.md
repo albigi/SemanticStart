@@ -255,6 +255,13 @@ this repository:
 | Streaming Zipformer encoder/decoder/joiner (int8) + tokens | ~73 MB | `csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26` on Hugging Face | Apache-2.0 |
 | Silero VAD v5.1 (`silero_vad.onnx`) | ~2.3 MB | `snakers4/silero-vad` on GitHub, pinned to a tag and verified by SHA-256 | MIT |
 
+Those sources are defaults, not fixtures. Dropping a `speech-model.json` into
+`%LOCALAPPDATA%\SemanticStart` overrides any of them — the model id, the five URLs, the VAD
+checksum, and the minimum sizes used to detect a truncated download — so a mirror, an offline
+internal host or a newer model revision needs no rebuild. Anything the file leaves out keeps its
+default, and a file that is present but unreadable fails loudly rather than quietly falling back to
+the upstream URLs.
+
 Known limitations:
 
 - English only. A second engine can be added behind `ISpeechTranscriber` without touching the UI,

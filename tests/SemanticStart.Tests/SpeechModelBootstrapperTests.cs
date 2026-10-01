@@ -82,7 +82,7 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
         foreach (var path in AllPaths(bootstrapper))
             Assert.Equal(_dir, Path.GetDirectoryName(path));
 
-        Assert.StartsWith(SpeechModelBootstrapper.ModelId, Path.GetFileName(bootstrapper.EncoderPath), StringComparison.Ordinal);
+        Assert.StartsWith(bootstrapper.ModelId, Path.GetFileName(bootstrapper.EncoderPath), StringComparison.Ordinal);
         Assert.Equal("silero_vad.onnx", Path.GetFileName(bootstrapper.VadPath));
 
         // Distinct names, or one download overwrites the last.
@@ -136,6 +136,61 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
         bootstrapper.TokensPath,
         bootstrapper.VadPath,
     ];
+
+    /// <summary>
+    /// An override file is the whole point of making the sources parametric - a mirror, an
+    /// internal host or a newer model revision has to be reachable without a rebuild - so the
+    /// round trip from JSON to the paths and URLs the bootstrapper actually uses is pinned.
+    /// </summary>
+    [Fact]
+    public void OverrideFileReplacesTheModelSources()
+    {
+        File.WriteAllText(
+            Path.Combine(_dir, SpeechModelOptions.FileName),
+            """
+            {
+              "modelId": "mirrored-zipformer",
+              "encoderUrl": "https://mirror.internal/encoder.onnx",
+              "minimumEncoderBytes": 1234,
+              "vadSha256": null
+            }
+            """);
+
+        var options = SpeechModelOptions.Load(_dir);
+        var bootstrapper = new SpeechModelBootstrapper(modelsDirectory: _dir, options: options);
+
+        Assert.Equal("https://mirror.internal/encoder.onnx", options.EncoderUrl);
+        Assert.Equal(1234, options.MinimumEncoderBytes);
+        Assert.Null(options.VadSha256);
+        Assert.StartsWith("mirrored-zipformer", Path.GetFileName(bootstrapper.EncoderPath), StringComparison.Ordinal);
+
+        // Unspecified members keep the upstream defaults rather than resetting to null or zero.
+        Assert.Equal(SpeechModelOptions.Default.DecoderUrl, options.DecoderUrl);
+        Assert.Equal(SpeechModelOptions.Default.MinimumVadBytes, options.MinimumVadBytes);
+    }
+
+    /// <summary>
+    /// No override file is the normal case and must not be an error, or every clean install would
+    /// fail to start dictation.
+    /// </summary>
+    [Fact]
+    public void MissingOverrideFileYieldsTheDefaults()
+    {
+        Assert.Same(SpeechModelOptions.Default, SpeechModelOptions.Load(_dir));
+    }
+
+    /// <summary>
+    /// A malformed override is reported instead of being ignored: downloading from the upstream
+    /// default when an operator has asked for a mirror would quietly defeat the reason they wrote
+    /// the file.
+    /// </summary>
+    [Fact]
+    public void MalformedOverrideFileIsReported()
+    {
+        File.WriteAllText(Path.Combine(_dir, SpeechModelOptions.FileName), "{ not json");
+
+        Assert.Throws<SpeechModelDownloadException>(() => SpeechModelOptions.Load(_dir));
+    }
 
     private static string PathFor(SpeechModelBootstrapper bootstrapper, string file) => file switch
     {

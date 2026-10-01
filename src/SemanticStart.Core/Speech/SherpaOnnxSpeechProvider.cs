@@ -25,16 +25,20 @@ public sealed class SherpaOnnxSpeechProvider : ISpeechTranscriberProvider
     {
         _models = models ?? new SpeechModelBootstrapper();
         _allowDownload = allowDownload;
+
+        // Built here rather than as an initializer because the model identity and download size
+        // now come from the bootstrapper's options, which an override file can change.
+        Metadata = new SpeechProviderMetadata(
+            ProviderId,
+            "sherpa-onnx streaming Zipformer",
+            _models.ModelId,
+            "en-US",
+            SupportsPartialResults: true,
+            RequiresModelDownload: true,
+            _models.Options.ApproximateDownloadBytes);
     }
 
-    public SpeechProviderMetadata Metadata { get; } = new(
-        ProviderId,
-        "sherpa-onnx streaming Zipformer",
-        SpeechModelBootstrapper.ModelId,
-        "en-US",
-        SupportsPartialResults: true,
-        RequiresModelDownload: true,
-        SpeechModelBootstrapper.ApproximateDownloadBytes);
+    public SpeechProviderMetadata Metadata { get; }
 
     public SpeechProviderAvailability CheckAvailability()
     {
@@ -62,7 +66,7 @@ public sealed class SherpaOnnxSpeechProvider : ISpeechTranscriberProvider
     {
         using var activity = SpeechDiagnostics.StartActivity(SpeechDiagnostics.EngineStartActivity);
         activity?.SetTag("speech.provider", ProviderId);
-        activity?.SetTag("speech.model", SpeechModelBootstrapper.ModelId);
+        activity?.SetTag("speech.model", _models.ModelId);
 
         var files = await _models.EnsureAsync(downloadProgress, cancellationToken).ConfigureAwait(false);
 
