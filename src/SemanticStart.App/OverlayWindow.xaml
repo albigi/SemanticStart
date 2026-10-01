@@ -310,6 +310,12 @@
                 <!-- Listening indicator and level meter. The meter is what tells a muted microphone
                      apart from a user who has not spoken yet: both produce no text. -->
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <!-- Shown between the press and the microphone opening: indeterminate while the
+                         recogniser loads, filling while the model downloads on first run. -->
+                    <ProgressBar x:Name="DictationPreparationMeter" Width="44" Height="4" VerticalAlignment="Center"
+                                 Minimum="0" Maximum="1" Value="{Binding DictationPreparationProgress, Mode=OneWay}"
+                                 IsIndeterminate="{Binding IsDictationPreparationIndeterminate, Mode=OneWay}"
+                                 Visibility="{Binding IsPreparingDictation, Converter={StaticResource BoolToVisible}}" />
                     <Border x:Name="ListeningIndicator" Width="8" Height="8" CornerRadius="4" VerticalAlignment="Center"
                             Background="{DynamicResource AccentBrush}"
                             Visibility="{Binding IsListening, Converter={StaticResource BoolToVisible}}" />

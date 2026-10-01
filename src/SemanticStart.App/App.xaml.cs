@@ -80,7 +80,8 @@ public partial class App : System.Windows.Application
             _overlayViewModel,
             settings,
             () => _activationManager?.IsDictationHotKeyHeld() ?? false,
-            () => _overlayWindow.ShowOverlay());
+            () => _overlayWindow.ShowOverlay(),
+            Log.CreateLogger<DictationController>());
         _overlayWindow.DictationRequested = () => _dictation.Toggle();
         _overlayWindow.DictationStopRequested = () => _dictation.Stop();
 
@@ -244,6 +245,9 @@ public partial class App : System.Windows.Application
         _instanceMutex?.Dispose();
         _mcpCancellation?.Dispose();
         ThemeService.Shutdown();
+
+        // Last, so anything disposed above still has somewhere to report a failure.
+        Log.Shutdown();
         base.OnExit(e);
     }
 

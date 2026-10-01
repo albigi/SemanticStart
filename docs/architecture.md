@@ -203,13 +203,24 @@ exceptions, and the app decides what to write. Dictation keeps that rule: it emi
 `SpeechDiagnostics.Reported` events for anything it handles internally, and `SpeechTelemetry` — in
 the app, next to `Log` — is the single subscriber that turns those into lines in `app.log`.
 
+Writing is `Microsoft.Extensions.Logging`. `FileLoggerProvider` is the sink — the one piece the
+framework does not ship, since a tray app has no console and no host to collect its output — and
+`Log` is a thin static facade over the factory so that the places with nowhere to inject a logger
+(a WinForms tray callback, the unhandled-exception handler, a window's code-behind) can still write.
+Anything constructed by hand takes an `ILogger` instead; `DictationController` and `SpeechTelemetry`
+are built that way. The MCP host writes to the same file as well as to stderr, since a client that
+captures stderr puts it somewhere the user cannot reach.
+
 ```mermaid
 flowchart LR
     CoreCode["Core.Speech"] -->|"ActivitySource"| Listener["SpeechTelemetry"]
     CoreCode -->|"Reported events"| Listener
-    Listener --> Log["Log → app.log"]
+    Listener -->|"ILogger"| Factory["ILoggerFactory"]
     CoreCode -.->|"same source, no app change"| External["dotnet-trace /<br/>OpenTelemetry"]
-    AppCode["App services"] --> Log
+    AppCode["App services"] -->|"ILogger / Log facade"| Factory
+    McpHost["MCP host"] --> Factory
+    McpHost --> Stderr["stderr"]
+    Factory --> Provider["FileLoggerProvider"] --> File["logs/app.log"]
 ```
 
 Spans carry durations and lengths only; transcript text is never written anywhere.

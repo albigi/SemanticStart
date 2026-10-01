@@ -263,6 +263,20 @@ public sealed class OverlayViewModel : ObservableObject
     /// <summary>Shown while the microphone is open, so an idle recogniser is never mistaken for a dead one.</summary>
     internal const string ListeningStatus = "Listening\u2026";
 
+    /// <summary>
+    /// Shown between the dictation hotkey being pressed and the microphone actually opening.
+    /// Normally that gap is nothing - the recogniser is warm from startup - but on the very first
+    /// run it spans a model download, and a press that produces no visible change at all is
+    /// indistinguishable from a hotkey that is not registered.
+    /// </summary>
+    internal const string PreparingStatus = "Getting dictation ready\u2026";
+
+    /// <summary>
+    /// The first-run case, where the wait is a download rather than a model load and is long
+    /// enough that the user deserves to know how far along it is.
+    /// </summary>
+    internal const string DownloadingModelStatus = "Downloading the speech model\u2026";
+
     private readonly SemanticSearchService _searchService;
     private readonly IconProvider _iconProvider;
     private readonly AppSettings _settings;
@@ -280,6 +294,8 @@ public sealed class OverlayViewModel : ObservableObject
     private bool _isSearching;
     private bool _isResultsActive;
     private bool _isListening;
+    private bool _isPreparingDictation;
+    private double _dictationPreparationProgress;
     private double _microphoneLevel;
 
     /// <summary>
@@ -364,6 +380,34 @@ public sealed class OverlayViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Whether a dictation turn has been asked for but the recogniser is not ready yet. Drives the
+    /// footer's preparation bar; never true at the same time as <see cref="IsListening"/>.
+    /// </summary>
+    public bool IsPreparingDictation
+    {
+        get => _isPreparingDictation;
+        private set => SetProperty(ref _isPreparingDictation, value);
+    }
+
+    /// <summary>
+    /// How far the first-run model download has got, 0 to 1. Negative means "working, but with no
+    /// measurable progress", which the bar shows as indeterminate rather than as a bar stuck at
+    /// zero - the difference between "something is happening" and "something has hung".
+    /// </summary>
+    public double DictationPreparationProgress
+    {
+        get => _dictationPreparationProgress;
+        private set
+        {
+            if (SetProperty(ref _dictationPreparationProgress, value))
+                OnPropertyChanged(nameof(IsDictationPreparationIndeterminate));
+        }
+    }
+
+    /// <summary>Whether the preparation bar has a figure to show or only the fact that it is busy.</summary>
+    public bool IsDictationPreparationIndeterminate => _dictationPreparationProgress < 0;
+
+    /// <summary>
     /// Loudness of the captured audio, 0 to 1, for the level meter. Without it a silent failure -
     /// a muted device, the wrong default endpoint - looks exactly like a user who has not spoken.
     /// </summary>
@@ -381,8 +425,37 @@ public sealed class OverlayViewModel : ObservableObject
     {
         _dictationPrefix = string.IsNullOrWhiteSpace(Query) ? string.Empty : Query.TrimEnd() + " ";
         MicrophoneLevel = 0;
+        ClearPreparation();
         IsListening = true;
         Status = ListeningStatus;
+    }
+
+    /// <summary>
+    /// Acknowledges a dictation request that cannot be served yet: the recogniser is still loading
+    /// or its model is still downloading. Called for every press in that window, including ones
+    /// that are otherwise dropped, so the answer to "did it hear me?" is always yes.
+    /// </summary>
+    /// <param name="downloadProgress">
+    /// Fraction of the model download completed, or null while there is no figure to report.
+    /// </param>
+    public void ReportDictationPreparing(double? downloadProgress = null)
+    {
+        if (IsListening)
+            return;
+
+        IsPreparingDictation = true;
+
+        if (downloadProgress is { } fraction)
+        {
+            var clamped = Math.Clamp(fraction, 0, 1);
+            DictationPreparationProgress = clamped;
+            Status = $"{DownloadingModelStatus} {clamped:P0}";
+        }
+        else
+        {
+            DictationPreparationProgress = -1;
+            Status = PreparingStatus;
+        }
     }
 
     /// <summary>
@@ -390,6 +463,17 @@ public sealed class OverlayViewModel : ObservableObject
     /// debouncer decides when to search exactly as it does for typing - the engine emits partials
     /// every few hundred milliseconds and searching each one would spend the machine on text the
     /// recogniser is about to change.
+    ///
+    /// <para>
+    /// Concatenation rather than a <c>StringBuilder</c>, deliberately. Nothing accumulates here:
+    /// each partial <em>replaces</em> the whole query, because the recogniser revises its own text
+    /// rather than appending to it, so there is no loop for a builder to amortise. The destination
+    /// is a <see cref="string"/> property bound to a <c>TextBox</c>, so the single result string
+    /// has to be materialised either way - a builder would allocate itself and an internal buffer
+    /// on top of it, and be slower. At two operands the compiler emits one
+    /// <see cref="string.Concat(string, string)"/>, which allocates exactly once and copies both
+    /// operands with no intermediate.
+    /// </para>
     /// </summary>
     public void ApplyPartialTranscript(string text) => Query = _dictationPrefix + text;
 
@@ -408,12 +492,21 @@ public sealed class OverlayViewModel : ObservableObject
     /// <summary>Closes a dictation turn, optionally with a message explaining why it ended.</summary>
     public void EndDictation(string? message = null)
     {
+        var wasPreparing = IsPreparingDictation;
         IsListening = false;
         MicrophoneLevel = 0;
+        ClearPreparation();
+
         if (message is not null)
             Status = message;
-        else if (string.Equals(Status, ListeningStatus, StringComparison.Ordinal))
+        else if (wasPreparing || string.Equals(Status, ListeningStatus, StringComparison.Ordinal))
             Status = Results.Count == 0 && Query.Length == 0 ? IdleStatus : string.Empty;
+    }
+
+    private void ClearPreparation()
+    {
+        IsPreparingDictation = false;
+        DictationPreparationProgress = 0;
     }
 
     public void ReportMicrophoneLevel(double level) => MicrophoneLevel = Math.Clamp(level, 0, 1);

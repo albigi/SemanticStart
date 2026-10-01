@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using SemanticStart.Core.Speech;
 
 namespace SemanticStart.App;
@@ -29,10 +30,13 @@ namespace SemanticStart.App;
 internal sealed class SpeechTelemetry : IDisposable
 {
     private readonly ActivityListener _listener;
+    private readonly ILogger _logger;
     private bool _disposed;
 
-    private SpeechTelemetry()
+    private SpeechTelemetry(ILogger logger)
     {
+        _logger = logger;
+
         _listener = new ActivityListener
         {
             ShouldListenTo = source => source.Name == SpeechDiagnostics.ActivitySourceName,
@@ -48,9 +52,10 @@ internal sealed class SpeechTelemetry : IDisposable
     }
 
     /// <summary>Starts forwarding speech diagnostics to the log. Called once, at startup.</summary>
-    public static SpeechTelemetry Install() => new();
+    public static SpeechTelemetry Install(ILogger? logger = null) =>
+        new(logger ?? Log.CreateLogger<SpeechTelemetry>());
 
-    private static void OnActivityStopped(Activity activity)
+    private void OnActivityStopped(Activity activity)
     {
         var line = new StringBuilder()
             .Append(activity.OperationName)
@@ -64,17 +69,17 @@ internal sealed class SpeechTelemetry : IDisposable
         foreach (var tag in activity.TagObjects.Where(tag => tag.Value is not null))
             line.Append(' ').Append(tag.Key).Append('=').Append(Format(tag.Value));
 
-        Log.Trace(line.ToString());
+        _logger.LogTrace("{Span}", line.ToString());
     }
 
-    private static void OnReported(SpeechDiagnosticEvent report)
+    private void OnReported(SpeechDiagnosticEvent report)
     {
         if (report.Exception is { } ex)
-            Log.Error(ex, $"speech/{report.Operation}: {report.Message}");
+            _logger.LogError(ex, "speech/{Operation}: {Message}", report.Operation, report.Message);
         else if (report.IsError)
-            Log.Info($"speech/{report.Operation}: {report.Message}");
+            _logger.LogInformation("speech/{Operation}: {Message}", report.Operation, report.Message);
         else
-            Log.Trace($"speech/{report.Operation}: {report.Message}");
+            _logger.LogTrace("speech/{Operation}: {Message}", report.Operation, report.Message);
     }
 
     private static string Format(object? value) => value switch

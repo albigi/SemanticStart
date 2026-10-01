@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Windows.Threading;
+using Microsoft.Extensions.Logging;
 using SemanticStart.Core;
 using SemanticStart.Core.Speech;
 
@@ -29,8 +30,31 @@ public sealed class DictationController : IDisposable
     /// </summary>
     private static readonly TimeSpan PushToTalkPollInterval = TimeSpan.FromMilliseconds(40);
 
+    /// <summary>
+    /// How long a press may wait for the recogniser before the microphone is no longer opened for
+    /// it.
+    ///
+    /// <para>
+    /// A warm recogniser is instant and a cold one is a few hundred milliseconds, so in the
+    /// ordinary case the press flows straight into listening. The case this guards is the first
+    /// run, where the wait is a 75 MB download: opening the microphone at the end of that would
+    /// mean recording started minutes after the keypress, quite possibly after the user had
+    /// stopped paying attention, which is the one thing a microphone must never do. Past this
+    /// threshold the overlay reports that dictation is ready and waits to be asked again.
+    /// </para>
+    /// </summary>
+    private static readonly TimeSpan ListenAfterPreparationLimit = TimeSpan.FromSeconds(5);
+
     private readonly Dispatcher _dispatcher;
     private readonly OverlayViewModel _viewModel;
+
+    /// <summary>
+    /// Injected rather than taken from the static <see cref="Log"/>, so the category on these
+    /// lines is this type and a test can be handed a logger that records instead of writing to
+    /// <c>%LOCALAPPDATA%</c>.
+    /// </summary>
+    private readonly ILogger _logger;
+
     private readonly Func<bool> _isHotKeyHeld;
     private readonly Action _showOverlay;
     /// <summary>
@@ -61,6 +85,17 @@ public sealed class DictationController : IDisposable
     /// </summary>
     private readonly CancellationTokenSource _startup = new();
 
+    /// <summary>
+    /// How many presses are currently waiting on the warm start. Model-download progress is only
+    /// pushed to the overlay while this is non-zero: during the silent background warm start there
+    /// is nobody waiting, and overwriting the status line of an overlay the user opened to type in
+    /// would be the app talking over them.
+    /// </summary>
+    private int _awaitingPreparation;
+
+    /// <summary>Last percentage shown, so an identical status line is not re-published 75 MB times.</summary>
+    private int _reportedPreparationPercent = -1;
+
     private AppSettings _settings;
     private DictationEngine? _engine;
     private Task<DictationEngine?>? _warmStart;
@@ -74,8 +109,10 @@ public sealed class DictationController : IDisposable
         OverlayViewModel viewModel,
         AppSettings settings,
         Func<bool> isHotKeyHeld,
-        Action showOverlay)
+        Action showOverlay,
+        ILogger? logger = null)
     {
+        _logger = logger ?? Log.CreateLogger<DictationController>();
         _dispatcher = dispatcher;
         _viewModel = viewModel;
         _settings = settings;
@@ -179,7 +216,7 @@ public sealed class DictationController : IDisposable
                     }
                     catch (Exception ex)
                     {
-                        Log.Error(ex, "Disposing the dictation engine failed");
+                        _logger.LogError(ex, "Disposing the dictation engine failed.");
                     }
                 },
                 // The load itself is cancelled above, by _startup. This token is the
@@ -197,7 +234,7 @@ public sealed class DictationController : IDisposable
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Disposing the dictation engine failed");
+                _logger.LogError(ex, "Disposing the dictation engine failed.");
             }
 
             _startup.Dispose();
@@ -211,7 +248,9 @@ public sealed class DictationController : IDisposable
         {
             var models = new SpeechModelBootstrapper();
             var selector = new SpeechEngineSelector([new SherpaOnnxSpeechProvider(models)]);
-            var startup = await selector.StartAsync(cancellationToken: _startup.Token).ConfigureAwait(false);
+            var startup = await selector
+                .StartAsync(new Progress<double>(OnPreparationProgress), _startup.Token)
+                .ConfigureAwait(false);
 
             // Every provider that said no, with its reason, rather than only the first one that
             // ends up in the status line: with a second engine this is the only record of why the
@@ -219,15 +258,15 @@ public sealed class DictationController : IDisposable
             foreach (var rejection in startup.Rejected)
             {
                 if (rejection.Exception is { } failure)
-                    Log.Error(failure, $"Speech provider '{rejection.Metadata.Id}' was rejected: {rejection.Reason}");
+                    _logger.LogError(failure, "Speech provider {ProviderId} was rejected: {Reason}", rejection.Metadata.Id, rejection.Reason);
                 else
-                    Log.Info($"Speech provider '{rejection.Metadata.Id}' was rejected: {rejection.Reason}");
+                    _logger.LogInformation("Speech provider {ProviderId} was rejected: {Reason}", rejection.Metadata.Id, rejection.Reason);
             }
 
             if (!startup.IsAvailable || startup.Transcriber is null)
             {
                 _unavailableReason = startup.FailureReason;
-                Log.Info($"Dictation is unavailable: {_unavailableReason}");
+                _logger.LogInformation("Dictation is unavailable: {Reason}", _unavailableReason);
                 return null;
             }
 
@@ -237,20 +276,26 @@ public sealed class DictationController : IDisposable
                 () => new WasapiMicrophoneCapture());
 
             _engine = engine;
-            Log.Info($"Dictation ready: {engine.Metadata.DisplayName} ({engine.Metadata.ModelId}) in {started.ElapsedMilliseconds} ms.");
+            _logger.LogInformation(
+                "Dictation ready: {Engine} ({ModelId}) in {ElapsedMs} ms.",
+                engine.Metadata.DisplayName,
+                engine.Metadata.ModelId,
+                started.ElapsedMilliseconds);
             return engine;
         }
         catch (OperationCanceledException) when (_startup.IsCancellationRequested)
         {
             // Shutdown, not a failure. Recorded rather than dropped so a log that ends here is
             // distinguishable from one where the load simply never finished.
-            Log.Info($"The dictation engine load was abandoned at shutdown after {started.ElapsedMilliseconds} ms.");
+            _logger.LogInformation(
+                "The dictation engine load was abandoned at shutdown after {ElapsedMs} ms.",
+                started.ElapsedMilliseconds);
             return null;
         }
         catch (Exception ex)
         {
             _unavailableReason = "The speech model could not be loaded; see the log for details.";
-            Log.Error(ex, $"Failed to start the dictation engine after {started.ElapsedMilliseconds} ms");
+            _logger.LogError(ex, "Failed to start the dictation engine after {ElapsedMs} ms.", started.ElapsedMilliseconds);
             return null;
         }
     }
@@ -258,12 +303,24 @@ public sealed class DictationController : IDisposable
     private async Task StartAsync()
     {
         if (!await _startGate.WaitAsync(0).ConfigureAwait(true))
+        {
+            // A start is already in flight. The press is still answered: on the first run that
+            // start is a model download, and silence here is indistinguishable from a hotkey that
+            // never registered. Only when the engine is not ready yet - once it is, losing this
+            // race is a sub-millisecond window and saying anything would just flicker.
+            if (_engine is null)
+                _viewModel.ReportDictationPreparing();
+
             return;
+        }
 
         CancellationTokenSource? session = null;
         try
         {
+            var waited = Stopwatch.StartNew();
             var engine = await WarmStartEngineAsync().ConfigureAwait(true);
+            waited.Stop();
+
             if (engine is null)
             {
                 _viewModel.EndDictation(_unavailableReason ?? "Dictation is unavailable on this machine.");
@@ -272,6 +329,15 @@ public sealed class DictationController : IDisposable
 
             if (_disposed || IsListening)
                 return;
+
+            if (waited.Elapsed > ListenAfterPreparationLimit)
+            {
+                _logger.LogInformation(
+                    "Dictation became ready after {ElapsedMs} ms; waiting for a fresh press rather than opening the microphone.",
+                    waited.ElapsedMilliseconds);
+                _viewModel.EndDictation($"Dictation is ready. Press {_settings.DictationHotKey} to talk.");
+                return;
+            }
 
             session = new CancellationTokenSource();
             _session = session;
@@ -294,9 +360,36 @@ public sealed class DictationController : IDisposable
         if (_engine is { } ready)
             return ready;
 
-        _viewModel.ReportStatus("Preparing dictation\u2026");
-        _warmStart ??= Task.Run(CreateEngineAsync);
-        return await _warmStart.ConfigureAwait(true);
+        // Counted rather than set, because two presses can be waiting on the same load and the
+        // first to finish must not switch progress reporting off for the second.
+        Interlocked.Increment(ref _awaitingPreparation);
+        try
+        {
+            _viewModel.ReportDictationPreparing();
+            _warmStart ??= Task.Run(CreateEngineAsync);
+            return await _warmStart.ConfigureAwait(true);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _awaitingPreparation);
+        }
+    }
+
+    /// <summary>
+    /// Model-download progress on its way to the overlay. Called from whichever thread is doing
+    /// the download, so it hops to the UI thread; throttled to whole percent, since the only
+    /// consumer is a status line and a 4 px bar.
+    /// </summary>
+    private void OnPreparationProgress(double fraction)
+    {
+        if (_disposed || Volatile.Read(ref _awaitingPreparation) == 0)
+            return;
+
+        var percent = (int)Math.Round(Math.Clamp(fraction, 0, 1) * 100);
+        if (Interlocked.Exchange(ref _reportedPreparationPercent, percent) == percent)
+            return;
+
+        _dispatcher.InvokeAsync(() => _viewModel.ReportDictationPreparing(percent / 100.0));
     }
 
     private async Task RunSessionAsync(CancellationTokenSource session)
@@ -322,19 +415,19 @@ public sealed class DictationController : IDisposable
             // Expected - it is how Stop, push-to-talk release and hiding the overlay all end a
             // session - but a session that ends with no trace at all is indistinguishable from one
             // that never started, so it is still recorded.
-            Log.Trace("Dictation session was cancelled.");
+            _logger.LogTrace("Dictation session was cancelled.");
             _viewModel.EndDictation();
         }
         catch (MicrophoneUnavailableException ex)
         {
             // Never fail silently here: a microphone that cannot be opened looks identical to a
             // recogniser that heard nothing, and only one of the two is fixable by the user.
-            Log.Error(ex, "The microphone could not be opened for dictation");
+            _logger.LogError(ex, "The microphone could not be opened for dictation.");
             _viewModel.EndDictation(ex.Message);
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Dictation failed");
+            _logger.LogError(ex, "Dictation failed.");
             _viewModel.EndDictation("Dictation failed; see the log for details.");
         }
         finally

@@ -232,6 +232,13 @@ It is off until you turn it on in Settings, because enabling it downloads about 
 model. Once on, the recogniser is loaded at startup and kept in memory, so pressing the hotkey
 starts listening immediately rather than loading a model in front of someone who is already talking.
 
+If you press the hotkey before that is finished - on the very first run, or immediately after
+enabling it - the overlay opens and says so, showing *Getting dictation ready…* while the recogniser
+loads and the download percentage while the model is still being fetched. The press is never
+silently ignored. If the wait was short - a cold model load - listening then starts on its own. If
+it was long enough to have been a download, the overlay says dictation is ready and waits for a
+fresh press instead, so the microphone never opens minutes after the key that asked for it.
+
 **Everything runs on this device.** Audio is captured by WASAPI, scored for speech by a local Silero
 VAD, and transcribed by a local sherpa-onnx streaming Zipformer - all through the same ONNX Runtime
 the index already uses. No audio is recorded to disk and none is sent anywhere. The platform's own
