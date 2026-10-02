@@ -225,8 +225,10 @@ button copies what you can actually paste and run.
 Dictation types into the search box by voice. Press **Win+Alt+/** (or the microphone button in the
 overlay footer) and speak; the words appear in the query as you say them, and the search runs when
 you stop. It is a way of filling the same query box - ranking, launching, and every shortcut above
-behave exactly as they do when typing - and spoken text is added after whatever is already there, so
-a query can be half typed and half spoken.
+behave exactly as they do when typing. Spoken text is added after keyboard-entered text, so a query
+can be half typed and half spoken. Starting another turn replaces the previous unedited dictation,
+keeping the typed prefix. Editing the query by keyboard preserves the whole edited query on the next
+turn. The **Clear search** button beside the query box erases either kind of input and stops listening.
 
 It is off until you turn it on in Settings, because enabling it downloads about 75 MB of speech
 model. Once on, the recogniser is loaded at startup and kept in memory, so pressing the hotkey
@@ -241,7 +243,9 @@ fresh press instead, so the microphone never opens minutes after the key that as
 
 **Everything runs on this device.** Audio is captured by WASAPI, scored for speech by a local Silero
 VAD, and transcribed by a local sherpa-onnx streaming Zipformer - all through the same ONNX Runtime
-the index already uses. No audio is recorded to disk and none is sent anywhere. The platform's own
+the index already uses. A four-path beam search retains alternative word sequences, and synthetic
+trailing silence lets the encoder finish word endings without waiting for more microphone audio.
+No audio is recorded to disk and none is sent anywhere. The platform's own
 recognisers are deliberately not used: `Windows.Media.SpeechRecognition` falls back to Microsoft's
 online service for anything beyond a fixed grammar, `System.Speech`/SAPI is a dictation-unaware
 legacy stack, and Win+H Voice Typing is a separate UI that types into whatever has focus and sends

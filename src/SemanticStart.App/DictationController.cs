@@ -403,7 +403,11 @@ public sealed class DictationController : IDisposable
         {
             await _engine!.ListenAsync(
                     options,
-                    transcript => _dispatcher.InvokeAsync(() => OnTranscript(transcript)),
+                    transcript => _dispatcher.InvokeAsync(() =>
+                    {
+                        if (!session.IsCancellationRequested)
+                            OnTranscript(transcript);
+                    }),
                     level => _dispatcher.InvokeAsync(() => _viewModel.ReportMicrophoneLevel(level)),
                     session.Token)
                 .ConfigureAwait(true);

@@ -89,6 +89,13 @@ public partial class OverlayWindow : Window
         DictationRequested?.Invoke();
     }
 
+    private void ClearQueryButton_Click(object sender, RoutedEventArgs e)
+    {
+        DictationStopRequested?.Invoke();
+        _viewModel.Query = string.Empty;
+        SearchBox.Focus();
+    }
+
     public void ShowOverlay()
     {
         // Registry theme changes are not always broadcast, so re-read on every activation.
