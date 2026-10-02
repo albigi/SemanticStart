@@ -4,6 +4,31 @@ namespace SemanticStart.Tests;
 
 public sealed class SpeechRecognitionConfigTests
 {
+    [Theory]
+    [InlineData(1)]
+    [InlineData(8)]
+    [InlineData(16)]
+    public void BeamWidthCanBeTunedWithoutChangingEndpointing(int paths)
+    {
+        var files = new SpeechModelFiles("encoder", "decoder", "joiner", "tokens", "vad");
+        var config = SherpaOnnxSpeechTranscriber.CreateConfig(files, paths);
+
+        Assert.Equal(paths, config.MaxActivePaths);
+        Assert.Equal("modified_beam_search", config.DecodingMethod);
+        Assert.Equal(0, config.EnableEndpoint);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(17)]
+    [InlineData(int.MaxValue)]
+    public void InvalidBeamWidthsAreRejectedBeforeNativeRecognizerCreation(int paths)
+    {
+        var files = new SpeechModelFiles("encoder", "decoder", "joiner", "tokens", "vad");
+        Assert.Throws<ArgumentOutOfRangeException>(() => SherpaOnnxSpeechTranscriber.CreateConfig(files, paths));
+    }
+
     [Fact]
     public void StreamingRecognitionKeepsAlternativeWordSequences()
     {

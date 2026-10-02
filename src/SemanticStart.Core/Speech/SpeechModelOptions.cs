@@ -42,6 +42,12 @@ public sealed record SpeechModelOptions
 
     public string TokensUrl { get; init; } = ZipformerBaseUrl + "tokens.txt";
 
+    /// <summary>
+    /// Beam-search hypotheses retained during decoding (1-16). More paths may improve recognition
+    /// at the cost of CPU time; four remains the default.
+    /// </summary>
+    public int MaxActivePaths { get; init; } = 4;
+
     /// <summary>Silero VAD v5.1, pinned to a tag so a released build's model cannot change.</summary>
     public string VadUrl { get; init; } =
         "https://raw.githubusercontent.com/snakers4/silero-vad/v5.1/src/silero_vad/data/silero_vad.onnx";

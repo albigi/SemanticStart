@@ -279,6 +279,28 @@ internal host or a newer model revision needs no rebuild. Anything the file leav
 default, and a file that is present but unreadable fails loudly rather than quietly falling back to
 the upstream URLs.
 
+#### Recognition tuning
+
+PR #4's four-path beam search and synthetic trailing silence remain enabled. For further tuning:
+
+- If a pause cuts off a phrase, increase **Silence that ends a phrase** in Settings (try 500–800 ms).
+  Synthetic silence finishes decoding audio already captured; it cannot recover speech after the
+  microphone has closed. The sherpa microphone example uses 800 ms for its speech endpoint rule,
+  but this app uses Silero endpointing, so the two thresholds are not equivalent.
+- Set `MaxActivePaths` to `8` in `%LOCALAPPDATA%\SemanticStart\speech-model.json`, retaining any
+  existing overrides, and restart the app to try a wider beam. Accepted values are 1–16; the default
+  remains 4. More hypotheses cost CPU and may not improve a given phrase. Check the speech timings
+  and dropped-buffer diagnostics below before increasing it further.
+- The existing model URL overrides can select a compatible streaming Zipformer model, including
+  float32 exports. Give it a distinct `ModelId` so cached int8 files are not reused, and update the
+  encoder, decoder, joiner, token URLs, minimum sizes, and download-size estimate together.
+  Larger/unquantized models require more memory and decoding time; compare representative phrases
+  rather than assuming a larger model or beam is more accurate.
+
+Silero v5.1 now receives its required 64-sample lookback before each 512-sample frame, with both
+context and recurrent state reset between turns. This corrects the VAD input rather than changing
+the selected recognition model or extending microphone capture.
+
 Known limitations:
 
 - English only. A second engine can be added behind `ISpeechTranscriber` without touching the UI,

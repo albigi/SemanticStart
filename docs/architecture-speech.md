@@ -7,6 +7,11 @@ The whole of dictation does one thing: it sets `OverlayViewModel.Query`. Nothing
 query box — search, ranking, launching — knows the text arrived by voice. That is the boundary to
 hold in mind while reading everything below.
 
+Silero v5.1 consumes 512 new samples (32 ms at 16 kHz) preceded by the previous frame's
+64-sample context. Context starts at zero and is reset along with recurrent state on each turn;
+the ONNX input is `[1, 576]`, not `[1, 512]`. Beam search still defaults to four active paths,
+with a bounded `MaxActivePaths` override in `speech-model.json` for local accuracy/CPU comparisons.
+
 ## The shape of it
 
 ```mermaid

@@ -77,7 +77,7 @@ public sealed class SherpaOnnxSpeechProvider : ISpeechTranscriberProvider
         try
         {
             var transcriber = await Task.Run(
-                () => (ISpeechTranscriber)new SherpaOnnxSpeechTranscriber(files, Metadata),
+                () => (ISpeechTranscriber)new SherpaOnnxSpeechTranscriber(files, Metadata, _models.Options.MaxActivePaths),
                 cancellationToken).ConfigureAwait(false);
 
             activity?.SetTag("speech.model_load_ms", loading.Elapsed.TotalMilliseconds);

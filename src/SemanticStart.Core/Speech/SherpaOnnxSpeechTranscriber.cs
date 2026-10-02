@@ -21,15 +21,17 @@ public sealed class SherpaOnnxSpeechTranscriber : ISpeechTranscriber
     private readonly OnlineRecognizer _recognizer;
     private bool _disposed;
 
-    public SherpaOnnxSpeechTranscriber(SpeechModelFiles files, SpeechProviderMetadata metadata)
+    public SherpaOnnxSpeechTranscriber(SpeechModelFiles files, SpeechProviderMetadata metadata, int maxActivePaths = 4)
     {
         ArgumentNullException.ThrowIfNull(files);
         Metadata = metadata;
-        _recognizer = new OnlineRecognizer(CreateConfig(files));
+        _recognizer = new OnlineRecognizer(CreateConfig(files, maxActivePaths));
     }
 
-    internal static OnlineRecognizerConfig CreateConfig(SpeechModelFiles files)
+    internal static OnlineRecognizerConfig CreateConfig(SpeechModelFiles files, int maxActivePaths = 4)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxActivePaths, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(maxActivePaths, 16);
         var config = new OnlineRecognizerConfig();
         config.FeatConfig.SampleRate = MonoFloatResampler.TargetSampleRate;
         config.FeatConfig.FeatureDim = 80;
@@ -45,7 +47,7 @@ public sealed class SherpaOnnxSpeechTranscriber : ISpeechTranscriber
         config.ModelConfig.NumThreads = 2;
         // Keep alternative word sequences instead of committing to each locally best token.
         config.DecodingMethod = "modified_beam_search";
-        config.MaxActivePaths = 4;
+        config.MaxActivePaths = maxActivePaths;
 
         // The recognizer's own endpointing is off: Silero decides when the utterance has ended,
         // because that decision is shared with the level meter and the listening indicator and is
