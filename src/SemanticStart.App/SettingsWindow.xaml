@@ -135,6 +135,58 @@
                     </Grid>
                 </Border>
 
+                <TextBlock Text="Dictation" Style="{StaticResource SectionHeader}" />
+
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <CheckBox x:Name="DictationBox" Content="Dictate into the search box" Checked="Dictation_Changed" Unchecked="Dictation_Changed" />
+                        <TextBlock Style="{StaticResource Caption}"
+                                   Text="Speech is recognised on this device by a local model. Nothing is recorded and no audio is sent anywhere. Turning this on downloads about 75 MB of model files once." />
+                        <TextBlock x:Name="DictationStatus" Style="{StaticResource Caption}" />
+                        <ProgressBar x:Name="DictationProgress" Height="4" Margin="0,8,0,0" Visibility="Collapsed"
+                                     Minimum="0" Maximum="1" />
+
+                        <Grid Margin="0,14,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="Dictation hotkey" />
+                                <TextBlock x:Name="DictationHotKeyStatus" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <local:HotKeyRecorder x:Name="DictationHotKeyBox" Grid.Column="1" VerticalAlignment="Center"
+                                                  HotKeyChanged="DictationHotKeyBox_HotKeyChanged"
+                                                  HotKeyRejected="HotKeyBox_HotKeyRejected"
+                                                  RecordingStarted="HotKeyBox_RecordingStarted"
+                                                  RecordingStopped="DictationHotKeyBox_RecordingStopped" />
+                        </Grid>
+
+                        <Grid Margin="0,14,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="Silence that ends a phrase" />
+                                <TextBlock Text="How long a pause has to last before what you said is searched. Shorter is faster; longer survives the pause in the middle of a phrase."
+                                           Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Slider x:Name="TrailingSilenceSlider" Width="180" Minimum="100" Maximum="1000" IsSnapToTickEnabled="True"
+                                        ValueChanged="Setting_ValueChanged" TickFrequency="20" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding ElementName=TrailingSilenceSlider, Path=Value, StringFormat={}{0:F0} ms}" Width="58"
+                                           TextAlignment="Right" Margin="10,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Grid>
+
+                        <CheckBox x:Name="PushToTalkBox" Margin="0,14,0,0" Content="Hold the hotkey to talk instead of pressing it twice"
+                                  Checked="Setting_Changed" Unchecked="Setting_Changed" />
+                        <TextBlock Style="{StaticResource Caption}"
+                                   Text="Windows reports hotkey presses but not releases, so holding is detected by checking the key a few times a second. Listening therefore stops shortly after you let go rather than at the instant you do." />
+                    </StackPanel>
+                </Border>
+
                 <TextBlock Text="Indexing" Style="{StaticResource SectionHeader}" />
 
                 <Border Style="{StaticResource Card}">

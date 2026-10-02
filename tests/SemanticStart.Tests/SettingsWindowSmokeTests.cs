@@ -138,6 +138,165 @@ public class SettingsWindowSmokeTests
     }
 
     /// <summary>
+    /// A dictation press that cannot be served yet must still be visibly acknowledged. On the
+    /// first run the gap between the press and the microphone opening is a 75 MB download, and an
+    /// overlay that shows nothing in that window is indistinguishable from a hotkey that never
+    /// registered - which is the bug report that would follow.
+    ///
+    /// <para>
+    /// Same class as the test below for the same reason: one <see cref="Application"/> per process.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void ADictationPressIsAcknowledgedWhileTheRecogniserIsStillBeingPrepared()
+    {
+        Exception? failure = null;
+        var preparingWithoutProgress = false;
+        var indeterminateWithoutProgress = false;
+        string? statusWhilePreparing = null;
+        var indeterminateWithProgress = true;
+        var progressValue = -1.0;
+        string? statusWhileDownloading = null;
+        var preparingAfterListeningStarted = true;
+        var preparingAfterFailure = true;
+        string? statusAfterFailure = null;
+
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                _ = Application.Current ?? new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+
+                var settings = new AppSettings();
+                using var searchService = new SemanticSearchService(settings);
+                var viewModel = new OverlayViewModel(searchService, new IconProvider(), settings);
+
+                viewModel.ReportDictationPreparing();
+                preparingWithoutProgress = viewModel.IsPreparingDictation;
+                indeterminateWithoutProgress = viewModel.IsDictationPreparationIndeterminate;
+                statusWhilePreparing = viewModel.Status;
+
+                viewModel.ReportDictationPreparing(0.42);
+                indeterminateWithProgress = viewModel.IsDictationPreparationIndeterminate;
+                progressValue = viewModel.DictationPreparationProgress;
+                statusWhileDownloading = viewModel.Status;
+
+                // The microphone opening replaces the preparation state rather than sitting
+                // alongside it, or the footer would show a download bar during the turn.
+                viewModel.BeginDictation();
+                preparingAfterListeningStarted = viewModel.IsPreparingDictation;
+                viewModel.EndDictation();
+
+                // A preparation that ends in failure must clear the bar and say why, not leave a
+                // bar turning forever.
+                viewModel.ReportDictationPreparing();
+                viewModel.EndDictation("Dictation is unavailable on this machine.");
+                preparingAfterFailure = viewModel.IsPreparingDictation;
+                statusAfterFailure = viewModel.Status;
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+
+        Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "The dictation preparation test timed out.");
+        Assert.Null(failure);
+
+        Assert.True(preparingWithoutProgress, "A press during warm start left the overlay showing nothing.");
+        Assert.True(indeterminateWithoutProgress, "A load with no measurable progress showed a bar stuck at zero.");
+        Assert.Equal(OverlayViewModel.PreparingStatus, statusWhilePreparing);
+
+        Assert.False(indeterminateWithProgress, "A download with a known fraction was still shown as indeterminate.");
+        Assert.Equal(0.42, progressValue, 3);
+        Assert.StartsWith(OverlayViewModel.DownloadingModelStatus, statusWhileDownloading, StringComparison.Ordinal);
+        Assert.Contains("42", statusWhileDownloading, StringComparison.Ordinal);
+
+        Assert.False(preparingAfterListeningStarted, "The preparation bar stayed up once the microphone opened.");
+        Assert.False(preparingAfterFailure, "The preparation bar stayed up after dictation failed to start.");
+        Assert.Equal("Dictation is unavailable on this machine.", statusAfterFailure);
+    }
+
+    /// <summary>
+    /// Dictation fills the same query box as typing, so it has to obey the same rule: a transcript
+    /// the recogniser is still revising waits for the debouncer, and a finished one searches at
+    /// once. Getting this backwards would either search every few hundred milliseconds against
+    /// text about to change, or leave the user who has stopped talking staring at stale results.
+    ///
+    /// <para>
+    /// Runs in this class rather than its own because xunit does not parallelise inside a class,
+    /// and the view model's debouncer marshals through <see cref="Application.Current"/> - which
+    /// WPF permits exactly one of per process.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void DictationPartialsWaitForTheDebouncerAndFinalTranscriptsSearchImmediately()
+    {
+        Exception? failure = null;
+        string? queryAfterPartial = null;
+        string? statusAfterPartial = null;
+        string? queryAfterFinal = null;
+        string? statusAfterFinal = null;
+        var listeningDuringPartial = false;
+        var listeningAfterEnd = true;
+
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                _ = Application.Current ?? new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+
+                var settings = new AppSettings();
+                using var searchService = new SemanticSearchService(settings);
+                var viewModel = new OverlayViewModel(searchService, new IconProvider(), settings);
+
+                viewModel.Query = "open";
+                viewModel.BeginDictation();
+
+                viewModel.ApplyPartialTranscript("note");
+                queryAfterPartial = viewModel.Query;
+                statusAfterPartial = viewModel.Status;
+                listeningDuringPartial = viewModel.IsListening;
+
+                var flush = viewModel.ApplyFinalTranscriptAsync("notepad");
+                while (!flush.IsCompleted)
+                    Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.Background);
+
+                queryAfterFinal = viewModel.Query;
+                statusAfterFinal = viewModel.Status;
+
+                viewModel.EndDictation();
+                listeningAfterEnd = viewModel.IsListening;
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+
+        Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "The dictation view model test timed out.");
+        Assert.Null(failure);
+
+        // What was already typed survives; the spoken words are added to it rather than over it.
+        Assert.Equal("open note", queryAfterPartial);
+        Assert.Equal("open notepad", queryAfterFinal);
+        Assert.True(listeningDuringPartial);
+        Assert.False(listeningAfterEnd);
+
+        // The status line is the visible proof of which path ran: still "Listening..." while the
+        // partial waits out the debounce interval, and replaced by the search's own answer once
+        // the final transcript has been flushed.
+        Assert.Equal(OverlayViewModel.ListeningStatus, statusAfterPartial);
+        Assert.NotEqual(OverlayViewModel.ListeningStatus, statusAfterFinal);
+    }
+
+    /// <summary>
     /// The empty-index line used to tell the user to rebuild while a rebuild was already running,
     /// next to a live progress bar and a disabled Rebuild button.
     /// </summary>

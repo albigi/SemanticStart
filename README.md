@@ -59,6 +59,10 @@ First launch builds the index and downloads the embedding model once — see [Us
   <img alt="Indexing runs offline: collectors, enrichment, synthesis and embeddings build index.sqlite. Querying is local: Win+Alt+. runs a vector arm and a lexical BM25 arm in parallel over that index, fused by RRF into the overlay." src="docs/pipeline-light.svg">
 </picture>
 
+A code-level companion to this section — projects, folders, and what calls what — is in
+[`docs/architecture.md`](docs/architecture.md), with dictation broken out separately in
+[`docs/architecture-speech.md`](docs/architecture-speech.md).
+
 **Indexing (offline).** Ten collectors enumerate what is on the machine, in this order — the order
 is deduplication precedence, so an earlier source wins when the same thing is found twice:
 
@@ -198,6 +202,7 @@ Everything can be changed later in Settings.
 | Key | Action |
 |---|---|
 | `Win+Alt+.` | Open the overlay (configurable) |
+| `Win+Alt+/` | Open the overlay and dictate (configurable, off until enabled) |
 | `Enter` | Launch |
 | `Down` / `Up` | Move into the results and back to the search box |
 | `Right` / `Left` | Show / hide the selected result's description (`Ctrl+D` toggles) |
@@ -214,6 +219,79 @@ entry on the clipboard, which for half of them is not the thing the index stores
 a URI, a Control Panel applet and an MMC snap-in are arguments to a host program, and a packaged
 app's launch target is an AppUserModelId that runs only behind `explorer.exe shell:AppsFolder\`. The
 button copies what you can actually paste and run.
+
+### Dictation
+
+Dictation types into the search box by voice. Press **Win+Alt+/** (or the microphone button in the
+overlay footer) and speak; the words appear in the query as you say them, and the search runs when
+you stop. It is a way of filling the same query box - ranking, launching, and every shortcut above
+behave exactly as they do when typing - and spoken text is added after whatever is already there, so
+a query can be half typed and half spoken.
+
+It is off until you turn it on in Settings, because enabling it downloads about 75 MB of speech
+model. Once on, the recogniser is loaded at startup and kept in memory, so pressing the hotkey
+starts listening immediately rather than loading a model in front of someone who is already talking.
+
+If you press the hotkey before that is finished - on the very first run, or immediately after
+enabling it - the overlay opens and says so, showing *Getting dictation ready…* while the recogniser
+loads and the download percentage while the model is still being fetched. The press is never
+silently ignored. If the wait was short - a cold model load - listening then starts on its own. If
+it was long enough to have been a download, the overlay says dictation is ready and waits for a
+fresh press instead, so the microphone never opens minutes after the key that asked for it.
+
+**Everything runs on this device.** Audio is captured by WASAPI, scored for speech by a local Silero
+VAD, and transcribed by a local sherpa-onnx streaming Zipformer - all through the same ONNX Runtime
+the index already uses. No audio is recorded to disk and none is sent anywhere. The platform's own
+recognisers are deliberately not used: `Windows.Media.SpeechRecognition` falls back to Microsoft's
+online service for anything beyond a fixed grammar, `System.Speech`/SAPI is a dictation-unaware
+legacy stack, and Win+H Voice Typing is a separate UI that types into whatever has focus and sends
+audio to the cloud unless the user has found the on-device setting.
+
+| Setting | Default | What it does |
+|---|---|---|
+| Dictate into the search box | off | Registers the dictation hotkey and keeps the recogniser warm |
+| Dictation hotkey | `Win+Alt+/` | Opens the overlay and starts listening; falls back to a free chord if taken |
+| Silence that ends a phrase | 220 ms | How long a pause must last before the phrase is searched |
+| Hold the hotkey to talk | off | Push-to-talk instead of press-to-start, press-to-stop |
+
+The models are downloaded once into `%LOCALAPPDATA%\SemanticStart\models` and never committed to
+this repository:
+
+| File | Size | Source | License |
+|---|---|---|---|
+| Streaming Zipformer encoder/decoder/joiner (int8) + tokens | ~73 MB | `csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26` on Hugging Face | Apache-2.0 |
+| Silero VAD v5.1 (`silero_vad.onnx`) | ~2.3 MB | `snakers4/silero-vad` on GitHub, pinned to a tag and verified by SHA-256 | MIT |
+
+Those sources are defaults, not fixtures. Dropping a `speech-model.json` into
+`%LOCALAPPDATA%\SemanticStart` overrides any of them — the model id, the five URLs, the VAD
+checksum, and the minimum sizes used to detect a truncated download — so a mirror, an offline
+internal host or a newer model revision needs no rebuild. Anything the file leaves out keeps its
+default, and a file that is present but unreadable fails loudly rather than quietly falling back to
+the upstream URLs.
+
+Known limitations:
+
+- English only. A second engine can be added behind `ISpeechTranscriber` without touching the UI,
+  which is what the provider/selection split exists for, but nothing else is shipped yet.
+- Push-to-talk is approximate. `RegisterHotKey` reports presses and not releases, and the only exact
+  alternative is a low-level keyboard hook, which this app does not install for the reasons in
+  `ActivationManager`. Release is therefore polled a few times a second, so listening stops shortly
+  after you let go rather than at the instant you do.
+- Accuracy is that of a small streaming model: good for app and feature names, weaker on unusual
+  proper nouns.
+- If Windows denies microphone access the overlay says so and names the setting to change -
+  **Let desktop apps access your microphone** - rather than simply transcribing nothing.
+
+`benchmarks/DictationLatencyProbe` measures microphone-to-first-partial and microphone-to-final
+latency on real hardware; see its README. The types involved, the startup and per-utterance paths,
+and the failure paths are drawn out in [`docs/architecture-speech.md`](docs/architecture-speech.md).
+
+Dictation logs to the same `%LOCALAPPDATA%\SemanticStart\logs\app.log` as the rest of the app, and
+adds `TRACE` lines with the timings that matter: how long the model took to load, how long until the
+first partial, why a session ended, and how much audio was captured or dropped. Those lines come
+from the `SemanticStart.Speech` activity source, so `dotnet-trace collect --providers
+SemanticStart.Speech` — or any OpenTelemetry listener — can sample the same spans with no change to
+the app. No transcript text is ever written to either; only lengths and durations.
 
 ### Where descriptions come from
 
@@ -390,8 +468,10 @@ paths or documents according to that model provider's privacy policy.
 
 ## Privacy
 
-Queries never leave the machine. The only network traffic is the one-time embedding model download
-and online enrichment during indexing, which sends only app and feature names, is cached to disk,
+Queries never leave the machine, and neither does anything said to it: dictation is transcribed by
+a local model and no audio is stored or transmitted. The only network traffic is the one-time
+embedding and speech model downloads, and online enrichment during indexing, which sends only app
+and feature names, is cached to disk,
 and is on by default but can be turned off in setup or Settings; the index is fully functional
 without it, just less able to find tools you cannot name. No inference of any kind leaves the
 machine.
@@ -408,6 +488,8 @@ data: it lives in `%LOCALAPPDATA%\SemanticStart` and is ignored by source contro
 | `src/SemanticStart.App` | WPF overlay, activation, tray icon, settings, and `--mcp` stdio server mode |
 | `tests/SemanticStart.Tests` | Unit and regression tests |
 | `tools/make-icon.ps1` | Redraws the app icon (`src/SemanticStart.App/Assets/SemanticStart.ico`) |
+| `benchmarks/DictationLatencyProbe` | Measures dictation latency on real hardware (not in the solution) |
+| `docs/architecture.md` | Code-level map of the solution, with [dictation](docs/architecture-speech.md) broken out |
 
 The icon is generated rather than drawn by hand so that every size in the `.ico` is rendered at its
 own resolution — a 16px tray icon resampled from a big bitmap loses the magnifier's ring. Run the

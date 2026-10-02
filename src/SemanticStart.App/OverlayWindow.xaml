@@ -297,7 +297,7 @@
                 </ListBox.ItemTemplate>
             </ListBox>
 
-            <!-- Footer: settings on the left, status to its right. -->
+            <!-- Footer: settings on the left, status to its right, dictation on the right. -->
             <Grid Grid.Row="3" Margin="2,6,0,0">
                 <Border Height="1" VerticalAlignment="Top" Background="{DynamicResource DividerBrush}" Margin="0,-6,0,0" />
                 <Button x:Name="SettingsButton" Style="{StaticResource SubtleButton}" HorizontalAlignment="Left"
@@ -305,7 +305,27 @@
                         Click="SettingsButton_Click" />
                 <TextBlock Text="{Binding Status}" Foreground="{DynamicResource SecondaryTextBrush}"
                            FontFamily="{DynamicResource UiFontSmall}" FontSize="{DynamicResource CaptionFontSize}"
-                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="40,0,4,0" />
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="40,0,80,0" />
+
+                <!-- Listening indicator and level meter. The meter is what tells a muted microphone
+                     apart from a user who has not spoken yet: both produce no text. -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <!-- Shown between the press and the microphone opening: indeterminate while the
+                         recogniser loads, filling while the model downloads on first run. -->
+                    <ProgressBar x:Name="DictationPreparationMeter" Width="44" Height="4" VerticalAlignment="Center"
+                                 Minimum="0" Maximum="1" Value="{Binding DictationPreparationProgress, Mode=OneWay}"
+                                 IsIndeterminate="{Binding IsDictationPreparationIndeterminate, Mode=OneWay}"
+                                 Visibility="{Binding IsPreparingDictation, Converter={StaticResource BoolToVisible}}" />
+                    <Border x:Name="ListeningIndicator" Width="8" Height="8" CornerRadius="4" VerticalAlignment="Center"
+                            Background="{DynamicResource AccentBrush}"
+                            Visibility="{Binding IsListening, Converter={StaticResource BoolToVisible}}" />
+                    <ProgressBar x:Name="MicrophoneLevelMeter" Width="44" Height="4" Margin="6,0,0,0" VerticalAlignment="Center"
+                                 Minimum="0" Maximum="1" Value="{Binding MicrophoneLevel, Mode=OneWay}"
+                                 Visibility="{Binding IsListening, Converter={StaticResource BoolToVisible}}" />
+                    <Button x:Name="DictationButton" Style="{StaticResource SubtleButton}" Margin="4,0,0,0"
+                            Width="32" Height="32" FontSize="15" Content="&#xE720;" ToolTip="Dictate (local speech recognition)"
+                            Click="DictationButton_Click" />
+                </StackPanel>
             </Grid>
         </Grid>
     </Border>
