@@ -136,7 +136,7 @@ sequenceDiagram
     participant VM as OverlayViewModel
 
     Key->>Ctl: Toggle()
-    Ctl->>VM: BeginDictation() — captures typed text as prefix
+    Ctl->>VM: BeginDictation() — replaces unedited speech, keeps typed prefix
     Ctl->>Eng: ListenAsync(options, onTranscript, onLevel, token)
     Eng->>Mic: CaptureAsync(token)
     loop while speaking

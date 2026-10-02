@@ -303,6 +303,10 @@ public sealed class OverlayViewModel : ObservableObject
     /// but they must not eat what the user typed first.
     /// </summary>
     private string _dictationPrefix = string.Empty;
+    private string _dictationBaseQuery = string.Empty;
+    private string? _lastDictatedQuery;
+    private bool _applyingTranscript;
+    private bool _dictationEdited;
 
     public OverlayViewModel(SemanticSearchService searchService, IconProvider iconProvider, AppSettings settings)
     {
@@ -323,6 +327,12 @@ public sealed class OverlayViewModel : ObservableObject
         {
             if (!SetProperty(ref _query, value))
                 return;
+            if (!_applyingTranscript)
+            {
+                _lastDictatedQuery = null;
+                if (IsListening)
+                    _dictationEdited = true;
+            }
             DebounceSearch();
         }
     }
@@ -418,12 +428,16 @@ public sealed class OverlayViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Opens a dictation turn. Whatever is already in the box is kept and spoken words are added
-    /// after it, so dictating is an edit to the query rather than a replacement of it.
+    /// Opens a dictation turn, replacing unedited speech from the previous turn while keeping
+    /// the text the user typed. A keyboard edit makes the whole query user-owned.
     /// </summary>
     public void BeginDictation()
     {
+        if (_lastDictatedQuery is not null)
+            Query = _dictationBaseQuery;
+        _dictationBaseQuery = Query;
         _dictationPrefix = string.IsNullOrWhiteSpace(Query) ? string.Empty : Query.TrimEnd() + " ";
+        _dictationEdited = false;
         MicrophoneLevel = 0;
         ClearPreparation();
         IsListening = true;
@@ -475,7 +489,23 @@ public sealed class OverlayViewModel : ObservableObject
     /// operands with no intermediate.
     /// </para>
     /// </summary>
-    public void ApplyPartialTranscript(string text) => Query = _dictationPrefix + text;
+    public void ApplyPartialTranscript(string text)
+    {
+        // A keyboard edit takes precedence over the remaining cumulative transcripts this turn.
+        if (_dictationEdited)
+            return;
+
+        _applyingTranscript = true;
+        try
+        {
+            Query = _dictationPrefix + text;
+            _lastDictatedQuery = Query;
+        }
+        finally
+        {
+            _applyingTranscript = false;
+        }
+    }
 
     /// <summary>
     /// The recogniser's settled text for an utterance. This one is worth searching immediately:
@@ -484,7 +514,10 @@ public sealed class OverlayViewModel : ObservableObject
     /// </summary>
     public async Task ApplyFinalTranscriptAsync(string text, CancellationToken cancellationToken = default)
     {
-        Query = _dictationPrefix + text;
+        if (_dictationEdited)
+            return;
+
+        ApplyPartialTranscript(text);
         _dictationPrefix = Query.Length == 0 ? string.Empty : Query.TrimEnd() + " ";
         await FlushPendingSearchAsync(cancellationToken);
     }
@@ -582,6 +615,9 @@ public sealed class OverlayViewModel : ObservableObject
         _debouncer.Cancel();
         _query = string.Empty;
         _dictationPrefix = string.Empty;
+        _dictationBaseQuery = string.Empty;
+        _lastDictatedQuery = null;
+        _dictationEdited = IsListening;
         OnPropertyChanged(nameof(Query));
         Results.Clear();
         _resultsQuery = string.Empty;

@@ -25,7 +25,11 @@ public sealed class SherpaOnnxSpeechTranscriber : ISpeechTranscriber
     {
         ArgumentNullException.ThrowIfNull(files);
         Metadata = metadata;
+        _recognizer = new OnlineRecognizer(CreateConfig(files));
+    }
 
+    internal static OnlineRecognizerConfig CreateConfig(SpeechModelFiles files)
+    {
         var config = new OnlineRecognizerConfig();
         config.FeatConfig.SampleRate = MonoFloatResampler.TargetSampleRate;
         config.FeatConfig.FeatureDim = 80;
@@ -39,14 +43,16 @@ public sealed class SherpaOnnxSpeechTranscriber : ISpeechTranscriber
         // that a dictation session does not make the rest of the machine stutter. This runs on a
         // user's foreground machine while they are waiting to search, not on a transcription box.
         config.ModelConfig.NumThreads = 2;
-        config.DecodingMethod = "greedy_search";
+        // Keep alternative word sequences instead of committing to each locally best token.
+        config.DecodingMethod = "modified_beam_search";
+        config.MaxActivePaths = 4;
 
         // The recognizer's own endpointing is off: Silero decides when the utterance has ended,
         // because that decision is shared with the level meter and the listening indicator and is
         // tuned by a setting the user can see. Two endpoint rules running at once would race.
         config.EnableEndpoint = 0;
 
-        _recognizer = new OnlineRecognizer(config);
+        return config;
     }
 
     public SpeechProviderMetadata Metadata { get; }
@@ -78,8 +84,11 @@ public sealed class SherpaOnnxSpeechTranscriber : ISpeechTranscriber
             yield return new PartialTranscript(text);
         }
 
-        // Flushing is what turns the trailing audio into words. Without it the last syllable of
-        // every utterance is left sitting in the encoder's lookahead window.
+        // Supply the encoder's right context before flushing, as in sherpa's streaming examples.
+        // This is synthetic silence, not an extra wait with the microphone open.
+        cancellationToken.ThrowIfCancellationRequested();
+        stream.AcceptWaveform(MonoFloatResampler.TargetSampleRate,
+            new float[MonoFloatResampler.TargetSampleRate * 6 / 10]);
         stream.InputFinished();
         while (_recognizer.IsReady(stream))
             _recognizer.Decode(stream);
