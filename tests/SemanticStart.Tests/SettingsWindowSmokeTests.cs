@@ -388,6 +388,15 @@ public class SettingsWindowSmokeTests
                 viewModel.ApplyPartialTranscript("new");
                 Assert.Equal("new", viewModel.Query);
                 viewModel.EndDictation();
+
+                viewModel.Query = "typed prefix";
+                viewModel.BeginDictation();
+                viewModel.ApplyPartialTranscript("old speech");
+                viewModel.EndDictation();
+                viewModel.Clear();
+                viewModel.BeginDictation();
+                Assert.Equal("", viewModel.Query);
+                viewModel.EndDictation();
                 window.Close();
             }
             catch (Exception ex)
@@ -398,6 +407,88 @@ public class SettingsWindowSmokeTests
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "The clear search test timed out.");
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void KeyboardEditWhileListeningIsNotOverwrittenByLaterTranscripts()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                _ = Application.Current ?? new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                var settings = new AppSettings();
+                using var searchService = new SemanticSearchService(settings);
+                var viewModel = new OverlayViewModel(searchService, new IconProvider(), settings);
+                viewModel.BeginDictation();
+                viewModel.ApplyPartialTranscript("note");
+                viewModel.Query = "open note";
+                viewModel.ApplyPartialTranscript("notep");
+                viewModel.ApplyFinalTranscriptAsync("notepad").GetAwaiter().GetResult();
+                Assert.Equal("open note", viewModel.Query);
+                viewModel.EndDictation();
+                viewModel.BeginDictation();
+                Assert.Equal("open note", viewModel.Query);
+                viewModel.ApplyPartialTranscript("settings");
+                Assert.Equal("open note settings", viewModel.Query);
+                viewModel.EndDictation();
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "The keyboard edit test timed out.");
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void StoppingDuringPreparationInvalidatesThePendingStart()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                _ = Application.Current ?? new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
+                var settings = new AppSettings { DictationEnabled = true };
+                using var searchService = new SemanticSearchService(settings);
+                var viewModel = new OverlayViewModel(searchService, new IconProvider(), settings);
+                using var controller = new DictationController(
+                    Dispatcher.CurrentDispatcher, viewModel, settings, () => false, () => { });
+                var preparation = new TaskCompletionSource<SemanticStart.Core.Speech.DictationEngine?>();
+                typeof(DictationController).GetField("_warmStart",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .SetValue(controller, preparation.Task);
+                var start = (Task)typeof(DictationController).GetMethod("StartAsync",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                    .Invoke(controller, null)!;
+                Assert.True(viewModel.IsPreparingDictation);
+                controller.Stop();
+                var stoppedStatus = viewModel.Status;
+                controller.Toggle();
+                Assert.True(viewModel.IsPreparingDictation);
+                preparation.SetResult(null);
+                while (!start.IsCompleted)
+                    Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.Background);
+                start.GetAwaiter().GetResult();
+                Assert.False(viewModel.IsPreparingDictation);
+                Assert.False(controller.IsListening);
+                Assert.Equal(stoppedStatus, viewModel.Status);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "The preparation cancellation test timed out.");
         Assert.Null(failure);
     }
 

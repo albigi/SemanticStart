@@ -95,6 +95,7 @@ public sealed class DictationController : IDisposable
 
     /// <summary>Last percentage shown, so an identical status line is not re-published 75 MB times.</summary>
     private int _reportedPreparationPercent = -1;
+    private int _stopVersion;
 
     private AppSettings _settings;
     private DictationEngine? _engine;
@@ -179,12 +180,14 @@ public sealed class DictationController : IDisposable
 
     public void Stop()
     {
+        _stopVersion++;
         StopPushToTalkPolling();
 
         // Cancelled but not disposed: the listening task is still holding this token, and
         // disposing it underneath ONNX and the capture wrapper is how a cancellation turns into an
         // ObjectDisposedException. RunSessionAsync's finally owns the disposal.
         _session?.Cancel();
+        _viewModel.EndDictation();
     }
 
     public void Dispose()
@@ -317,9 +320,18 @@ public sealed class DictationController : IDisposable
         CancellationTokenSource? session = null;
         try
         {
+            var stopVersion = _stopVersion;
             var waited = Stopwatch.StartNew();
             var engine = await WarmStartEngineAsync().ConfigureAwait(true);
             waited.Stop();
+
+            if (_disposed)
+                return;
+            if (stopVersion != _stopVersion || !_settings.DictationEnabled)
+            {
+                _viewModel.EndDictation();
+                return;
+            }
 
             if (engine is null)
             {
@@ -389,7 +401,11 @@ public sealed class DictationController : IDisposable
         if (Interlocked.Exchange(ref _reportedPreparationPercent, percent) == percent)
             return;
 
-        _dispatcher.InvokeAsync(() => _viewModel.ReportDictationPreparing(percent / 100.0));
+        _dispatcher.InvokeAsync(() =>
+        {
+            if (_viewModel.IsPreparingDictation)
+                _viewModel.ReportDictationPreparing(percent / 100.0);
+        });
     }
 
     private async Task RunSessionAsync(CancellationTokenSource session)

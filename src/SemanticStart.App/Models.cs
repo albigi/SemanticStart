@@ -306,6 +306,7 @@ public sealed class OverlayViewModel : ObservableObject
     private string _dictationBaseQuery = string.Empty;
     private string? _lastDictatedQuery;
     private bool _applyingTranscript;
+    private bool _dictationEdited;
 
     public OverlayViewModel(SemanticSearchService searchService, IconProvider iconProvider, AppSettings settings)
     {
@@ -330,10 +331,7 @@ public sealed class OverlayViewModel : ObservableObject
             {
                 _lastDictatedQuery = null;
                 if (IsListening)
-                {
-                    _dictationBaseQuery = value;
-                    _dictationPrefix = string.IsNullOrWhiteSpace(value) ? string.Empty : value.TrimEnd() + " ";
-                }
+                    _dictationEdited = true;
             }
             DebounceSearch();
         }
@@ -439,6 +437,7 @@ public sealed class OverlayViewModel : ObservableObject
             Query = _dictationBaseQuery;
         _dictationBaseQuery = Query;
         _dictationPrefix = string.IsNullOrWhiteSpace(Query) ? string.Empty : Query.TrimEnd() + " ";
+        _dictationEdited = false;
         MicrophoneLevel = 0;
         ClearPreparation();
         IsListening = true;
@@ -492,6 +491,10 @@ public sealed class OverlayViewModel : ObservableObject
     /// </summary>
     public void ApplyPartialTranscript(string text)
     {
+        // A keyboard edit takes precedence over the remaining cumulative transcripts this turn.
+        if (_dictationEdited)
+            return;
+
         _applyingTranscript = true;
         try
         {
@@ -511,6 +514,9 @@ public sealed class OverlayViewModel : ObservableObject
     /// </summary>
     public async Task ApplyFinalTranscriptAsync(string text, CancellationToken cancellationToken = default)
     {
+        if (_dictationEdited)
+            return;
+
         ApplyPartialTranscript(text);
         _dictationPrefix = Query.Length == 0 ? string.Empty : Query.TrimEnd() + " ";
         await FlushPendingSearchAsync(cancellationToken);
@@ -609,6 +615,9 @@ public sealed class OverlayViewModel : ObservableObject
         _debouncer.Cancel();
         _query = string.Empty;
         _dictationPrefix = string.Empty;
+        _dictationBaseQuery = string.Empty;
+        _lastDictatedQuery = null;
+        _dictationEdited = IsListening;
         OnPropertyChanged(nameof(Query));
         Results.Clear();
         _resultsQuery = string.Empty;

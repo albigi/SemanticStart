@@ -92,7 +92,7 @@ public partial class OverlayWindow : Window
     private void ClearQueryButton_Click(object sender, RoutedEventArgs e)
     {
         DictationStopRequested?.Invoke();
-        _viewModel.Query = string.Empty;
+        _viewModel.Clear();
         SearchBox.Focus();
     }
 

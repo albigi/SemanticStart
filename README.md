@@ -228,7 +228,8 @@ you stop. It is a way of filling the same query box - ranking, launching, and ev
 behave exactly as they do when typing. Spoken text is added after keyboard-entered text, so a query
 can be half typed and half spoken. Starting another turn replaces the previous unedited dictation,
 keeping the typed prefix. Editing the query by keyboard preserves the whole edited query on the next
-turn. The **Clear search** button beside the query box erases either kind of input and stops listening.
+turn; edits made while listening also take precedence over that turn's remaining transcripts.
+The **Clear search** button beside the query box erases either kind of input and stops listening.
 
 It is off until you turn it on in Settings, because enabling it downloads about 75 MB of speech
 model. Once on, the recogniser is loaded at startup and kept in memory, so pressing the hotkey
