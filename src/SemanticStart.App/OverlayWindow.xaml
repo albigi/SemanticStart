@@ -140,9 +140,19 @@
                 </StackPanel>
             </Grid>
 
-            <TextBox x:Name="SearchBox" Grid.Row="1" Style="{StaticResource SearchTextBox}"
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="SearchBox" Style="{StaticResource SearchTextBox}"
                      TextChanged="SearchBox_TextChanged"
                      Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}" />
+                <Button Grid.Column="1" Style="{StaticResource SubtleButton}" Margin="6,0,0,0"
+                        Content="&#xE894;" ToolTip="Clear search"
+                        AutomationProperties.Name="Clear search"
+                        Click="ClearSearchButton_Click" />
+            </Grid>
 
             <ListBox x:Name="ResultsList" Grid.Row="2" Margin="0,12,0,4" ItemsSource="{Binding Results}"
                      SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}" Background="Transparent" BorderThickness="0"

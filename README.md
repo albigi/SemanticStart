@@ -233,6 +233,11 @@ you stop. It is a way of filling the same query box - ranking, launching, and ev
 behave exactly as they do when typing - and spoken text is added after whatever is already there, so
 a query can be half typed and half spoken.
 
+Retrying dictation replaces the previous unedited spoken text and keeps the typed prefix. If you
+edit the query with the keyboard, it becomes yours: remaining transcripts from that turn are ignored,
+and the next dictation keeps the edited query. **Clear search** clears the query and cancels both
+active listening and a pending start; dismissing the overlay does the same.
+
 It is off until you turn it on in Settings, because enabling it downloads about 75 MB of speech
 model. Once on, the recogniser is loaded at startup and kept in memory, so pressing the hotkey
 starts listening immediately rather than loading a model in front of someone who is already talking.

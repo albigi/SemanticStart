@@ -100,6 +100,8 @@ public sealed class DictationController : IDisposable
     private DictationEngine? _engine;
     private Task<DictationEngine?>? _warmStart;
     private CancellationTokenSource? _session;
+    private CancellationTokenSource? _pendingStart;
+    private int _listenVersion;
     private DispatcherTimer? _pushToTalkTimer;
     private string? _unavailableReason;
     private bool _disposed;
@@ -131,7 +133,7 @@ public sealed class DictationController : IDisposable
         if (settings.DictationEnabled && !wasEnabled)
             _ = WarmStartAsync();
         else if (!settings.DictationEnabled)
-            Stop();
+            Cancel();
     }
 
     /// <summary>
@@ -180,11 +182,20 @@ public sealed class DictationController : IDisposable
     public void Stop()
     {
         StopPushToTalkPolling();
+        _pendingStart?.Cancel();
 
         // Cancelled but not disposed: the listening task is still holding this token, and
         // disposing it underneath ONNX and the capture wrapper is how a cancellation turns into an
         // ObjectDisposedException. RunSessionAsync's finally owns the disposal.
         _session?.Cancel();
+    }
+
+    /// <summary>Abandons a turn, including queued transcripts and a pending model-start request.</summary>
+    public void Cancel()
+    {
+        _listenVersion++;
+        Stop();
+        _viewModel.EndDictation();
     }
 
     public void Dispose()
@@ -193,7 +204,7 @@ public sealed class DictationController : IDisposable
             return;
         _disposed = true;
 
-        Stop();
+        Cancel();
         _startup.Cancel();
 
         // The start gate is deliberately not disposed: a start that is still between its wait and
@@ -314,12 +325,15 @@ public sealed class DictationController : IDisposable
             return;
         }
 
+        using var pendingStart = new CancellationTokenSource();
+        _pendingStart = pendingStart;
         CancellationTokenSource? session = null;
         try
         {
             var waited = Stopwatch.StartNew();
-            var engine = await WarmStartEngineAsync().ConfigureAwait(true);
+            var engine = await WarmStartEngineAsync(pendingStart.Token).ConfigureAwait(true);
             waited.Stop();
+            pendingStart.Token.ThrowIfCancellationRequested();
 
             if (engine is null)
             {
@@ -327,7 +341,7 @@ public sealed class DictationController : IDisposable
                 return;
             }
 
-            if (_disposed || IsListening)
+            if (_disposed || !_settings.DictationEnabled || IsListening)
                 return;
 
             if (waited.Elapsed > ListenAfterPreparationLimit)
@@ -341,11 +355,17 @@ public sealed class DictationController : IDisposable
 
             session = new CancellationTokenSource();
             _session = session;
+            _listenVersion++;
             _viewModel.BeginDictation();
             StartPushToTalkPolling();
         }
+        catch (OperationCanceledException) when (pendingStart.IsCancellationRequested)
+        {
+            _viewModel.EndDictation();
+        }
         finally
         {
+            _pendingStart = null;
             _startGate.Release();
         }
 
@@ -355,7 +375,7 @@ public sealed class DictationController : IDisposable
         await RunSessionAsync(session).ConfigureAwait(true);
     }
 
-    private async Task<DictationEngine?> WarmStartEngineAsync()
+    private async Task<DictationEngine?> WarmStartEngineAsync(CancellationToken cancellationToken)
     {
         if (_engine is { } ready)
             return ready;
@@ -367,7 +387,7 @@ public sealed class DictationController : IDisposable
         {
             _viewModel.ReportDictationPreparing();
             _warmStart ??= Task.Run(CreateEngineAsync);
-            return await _warmStart.ConfigureAwait(true);
+            return await _warmStart.WaitAsync(cancellationToken).ConfigureAwait(true);
         }
         finally
         {
@@ -389,11 +409,16 @@ public sealed class DictationController : IDisposable
         if (Interlocked.Exchange(ref _reportedPreparationPercent, percent) == percent)
             return;
 
-        _dispatcher.InvokeAsync(() => _viewModel.ReportDictationPreparing(percent / 100.0));
+        _dispatcher.InvokeAsync(() =>
+        {
+            if (!_disposed && _pendingStart is { IsCancellationRequested: false })
+                _viewModel.ReportDictationPreparing(percent / 100.0);
+        });
     }
 
     private async Task RunSessionAsync(CancellationTokenSource session)
     {
+        var version = _listenVersion;
         var options = new DictationOptions
         {
             TrailingSilence = TimeSpan.FromMilliseconds(_settings.DictationTrailingSilenceMilliseconds),
@@ -403,8 +428,16 @@ public sealed class DictationController : IDisposable
         {
             await _engine!.ListenAsync(
                     options,
-                    transcript => _dispatcher.InvokeAsync(() => OnTranscript(transcript)),
-                    level => _dispatcher.InvokeAsync(() => _viewModel.ReportMicrophoneLevel(level)),
+                    transcript => _dispatcher.InvokeAsync(() =>
+                    {
+                        if (version == _listenVersion)
+                            OnTranscript(transcript);
+                    }),
+                    level => _dispatcher.InvokeAsync(() =>
+                    {
+                        if (version == _listenVersion)
+                            _viewModel.ReportMicrophoneLevel(level);
+                    }),
                     session.Token)
                 .ConfigureAwait(true);
 

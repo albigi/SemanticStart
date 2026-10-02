@@ -22,6 +22,18 @@ namespace SemanticStart.Tests;
 public sealed class ResultCardBindingTests
 {
     [Fact]
+    public void ClearSearchHasAnAccessibleNameAndAClickHandler()
+    {
+        var xaml = XDocument.Load(OverlayXamlPath());
+        var button = Assert.Single(xaml.Descendants(), element => element.Name.LocalName == "Button"
+            && (string?)element.Attribute("AutomationProperties.Name") == "Clear search");
+
+        Assert.Equal("Clear search", (string?)button.Attribute("ToolTip"));
+        Assert.Equal("ClearSearchButton_Click", (string?)button.Attribute("Click"));
+        Assert.NotEqual("False", (string?)button.Attribute("Focusable"));
+    }
+
+    [Fact]
     public void EveryBindingInTheResultCardNamesAPropertyOnTheItem()
     {
         var template = ResultCardTemplate();
