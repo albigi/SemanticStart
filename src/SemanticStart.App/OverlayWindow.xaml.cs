@@ -89,13 +89,6 @@ public partial class OverlayWindow : Window
         DictationRequested?.Invoke();
     }
 
-    private void ClearSearchButton_Click(object sender, RoutedEventArgs e)
-    {
-        DictationStopRequested?.Invoke();
-        _viewModel.Clear();
-        SearchBox.Focus();
-    }
-
     public void ShowOverlay()
     {
         // Registry theme changes are not always broadcast, so re-read on every activation.
@@ -124,7 +117,8 @@ public partial class OverlayWindow : Window
 
         // Closing the overlay ends the dictation turn with it. A microphone that stays open behind
         // a hidden window is exactly the behaviour a local-only feature cannot afford to have.
-        DictationStopRequested?.Invoke();
+        if (_viewModel.IsListening)
+            DictationStopRequested?.Invoke();
 
         Hide();
         ClearCopiedFlash();

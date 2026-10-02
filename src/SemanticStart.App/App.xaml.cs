@@ -83,7 +83,7 @@ public partial class App : System.Windows.Application
             () => _overlayWindow.ShowOverlay(),
             Log.CreateLogger<DictationController>());
         _overlayWindow.DictationRequested = () => _dictation.Toggle();
-        _overlayWindow.DictationStopRequested = () => _dictation.Cancel();
+        _overlayWindow.DictationStopRequested = () => _dictation.Stop();
 
         _activationManager = new ActivationManager(
             _overlayWindow.Dispatcher,

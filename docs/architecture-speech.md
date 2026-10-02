@@ -7,12 +7,6 @@ The whole of dictation does one thing: it sets `OverlayViewModel.Query`. Nothing
 query box — search, ranking, launching — knows the text arrived by voice. That is the boundary to
 hold in mind while reading everything below.
 
-The transducer uses `modified_beam_search` with four active paths. Once capture ends, it receives
-500 ms of synthetic silence before flushing; this finishes word endings without keeping the
-microphone open longer. Retries replace only unedited dictated text. Keyboard edits take ownership
-of the whole query and suppress the rest of that turn's transcripts. Clear search and overlay
-dismissal cancel active and pending listening and invalidate queued transcript callbacks.
-
 ## The shape of it
 
 ```mermaid
@@ -142,7 +136,7 @@ sequenceDiagram
     participant VM as OverlayViewModel
 
     Key->>Ctl: Toggle()
-    Ctl->>VM: BeginDictation() — retains typed prefix, replaces unedited dictation
+    Ctl->>VM: BeginDictation() — captures typed text as prefix
     Ctl->>Eng: ListenAsync(options, onTranscript, onLevel, token)
     Eng->>Mic: CaptureAsync(token)
     loop while speaking
@@ -155,7 +149,7 @@ sequenceDiagram
     end
     Vad-->>Eng: trailing silence reached (220 ms default)
     Eng->>Mic: cancel — ends the audio enumeration
-    Trn->>Trn: 500 ms synthetic silence + InputFinished() + flush
+    Trn->>Trn: InputFinished() + flush
     Trn-->>Ctl: FinalTranscript
     Ctl->>VM: ApplyFinalTranscriptAsync → FlushPendingSearchAsync
     Ctl->>VM: EndDictation()
