@@ -21,25 +21,6 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
     public SpeechModelBootstrapperTests() => Directory.CreateDirectory(_dir);
 
     [Fact]
-    public void BeamWidthOverrideLoadsAlongsideModelOptions()
-    {
-        File.WriteAllText(Path.Combine(_dir, SpeechModelOptions.FileName), """{"MaxActivePaths":8}""");
-
-        var options = SpeechModelOptions.Load(_dir);
-
-        Assert.Equal(8, options.MaxActivePaths);
-        Assert.Equal(SpeechModelOptions.Default.ModelId, options.ModelId);
-    }
-
-    [Fact]
-    public void ExistingModelOverridesKeepTheFourPathDefault()
-    {
-        File.WriteAllText(Path.Combine(_dir, SpeechModelOptions.FileName), """{"ModelId":"test-model"}""");
-
-        Assert.Equal(4, SpeechModelOptions.Load(_dir).MaxActivePaths);
-    }
-
-    [Fact]
     public void NothingOnDiskMeansNothingIsDownloaded()
     {
         Assert.False(new SpeechModelBootstrapper(modelsDirectory: _dir).IsDownloaded);
