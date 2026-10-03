@@ -9,8 +9,10 @@ hold in mind while reading everything below.
 
 Silero v5.1 consumes 512 new samples (32 ms at 16 kHz) preceded by the previous frame's
 64-sample context. Context starts at zero and is reset along with recurrent state on each turn;
-the ONNX input is `[1, 576]`, not `[1, 512]`. Beam search still defaults to four active paths,
-with a bounded `MaxActivePaths` override in `speech-model.json` for local accuracy/CPU comparisons.
+the ONNX input is `[1, 576]`, not `[1, 512]`. The streaming Parakeet recognizer decodes with
+greedy search - its native implementation does not support beam search at all, unlike the
+streaming Zipformer this app used before - so there is no `MaxActivePaths` to tune in
+`speech-model.json` any more.
 
 ## The shape of it
 
@@ -113,7 +115,7 @@ sequenceDiagram
             Sel-->>Sel: record SpeechProviderRejection
         else available
             Sel->>Prv: CreateAsync(progress, token)
-            Prv->>Boot: EnsureAsync(...) — ~75 MB on first run
+            Prv->>Boot: EnsureAsync(...) — ~665 MB on first run
             Boot-->>Prv: SpeechModelFiles
             Prv->>Trn: new (3 ONNX sessions)
             Trn-->>Sel: ISpeechTranscriber
@@ -183,7 +185,7 @@ Two details in that diagram are load-bearing:
 | `MonoFloatResampler` | Device format → 16 kHz mono float | Stateful across buffers, so the seam between WASAPI packets does not dip |
 | `SileroVoiceActivityDetector` | Per-frame speech probability | Recurrent state, so it belongs to one session and is reset between turns |
 | `SpeechEndpointDetector` | Turns probabilities into "they have stopped" | Pure and testable; the tuning the user can see in Settings lives here |
-| `SherpaOnnxSpeechTranscriber` | Streaming Zipformer decode | Its own endpointing is disabled — two endpoint rules would race |
+| `SherpaOnnxSpeechTranscriber` | Streaming Parakeet decode | Its own endpointing is disabled — two endpoint rules would race |
 | `DictationEngine` | Wires the above into one turn | Long-lived and warm; `ListenAsync` loads nothing |
 | `SpeechModelBootstrapper` | Fetches models on first use | Mirrors `EmbeddingModelBootstrapper`: same temp file, progress and size floors |
 | `SpeechModelOptions` | Where the models come from | Holds every URL, checksum and size floor, so a mirror or a newer revision is a `speech-model.json` away rather than a rebuild |

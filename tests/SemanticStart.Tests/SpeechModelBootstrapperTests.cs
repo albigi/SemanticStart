@@ -5,7 +5,7 @@ namespace SemanticStart.Tests;
 /// <summary>
 /// Only the part of the bootstrapper that can be answered from disk: where the files go, and
 /// whether they are all there. That question is asked at startup to decide whether dictation can
-/// be loaded without first asking the user to authorise a 75 MB download, so a wrong answer either
+/// be loaded without first asking the user to authorise a ~665 MB download, so a wrong answer either
 /// downloads without consent or reports a model missing that is sitting right there.
 ///
 /// <para>
@@ -21,22 +21,46 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
     public SpeechModelBootstrapperTests() => Directory.CreateDirectory(_dir);
 
     [Fact]
-    public void BeamWidthOverrideLoadsAlongsideModelOptions()
-    {
-        File.WriteAllText(Path.Combine(_dir, SpeechModelOptions.FileName), """{"MaxActivePaths":8}""");
-
-        var options = SpeechModelOptions.Load(_dir);
-
-        Assert.Equal(8, options.MaxActivePaths);
-        Assert.Equal(SpeechModelOptions.Default.ModelId, options.ModelId);
-    }
-
-    [Fact]
-    public void ExistingModelOverridesKeepTheFourPathDefault()
+    public void ModelIdOverrideLoadsAlongsideTheRestOfTheDefaults()
     {
         File.WriteAllText(Path.Combine(_dir, SpeechModelOptions.FileName), """{"ModelId":"test-model"}""");
 
-        Assert.Equal(4, SpeechModelOptions.Load(_dir).MaxActivePaths);
+        var options = SpeechModelOptions.Load(_dir);
+
+        Assert.Equal("test-model", options.ModelId);
+        Assert.Equal(SpeechModelOptions.Default.EncoderUrl, options.EncoderUrl);
+    }
+
+    /// <summary>
+    /// The size floors are deliberately set well below the model files' actual published sizes -
+    /// see the remarks on <see cref="SpeechModelOptions.MinimumEncoderBytes"/> - so this pins the
+    /// relationships that make that a safe choice rather than the exact numbers, which are free to
+    /// move a little with a future export without becoming a test failure: every floor must still
+    /// be positive, small enough to be clearly below a genuine download, and ordered the same way
+    /// the files themselves are ordered by size (encoder &gt;&gt; decoder &gt; joiner &gt; tokens).
+    /// </summary>
+    [Fact]
+    public void SizeFloorsAreOrderedAndStrictlyBelowTheApproximateTotal()
+    {
+        var options = SpeechModelOptions.Default;
+
+        Assert.True(options.MinimumEncoderBytes > 0);
+        Assert.True(options.MinimumDecoderBytes > 0);
+        Assert.True(options.MinimumJoinerBytes > 0);
+        Assert.True(options.MinimumTokensBytes > 0);
+        Assert.True(options.MinimumVadBytes > 0);
+
+        Assert.True(options.MinimumEncoderBytes > options.MinimumDecoderBytes);
+        Assert.True(options.MinimumDecoderBytes > options.MinimumJoinerBytes);
+        Assert.True(options.MinimumJoinerBytes > options.MinimumTokensBytes);
+
+        // The floors exist to catch a truncated download, not to pin the real size, so every
+        // floor - including their sum - must still leave headroom below what the user is told to
+        // expect, or a download that is genuinely complete but a little smaller than today's
+        // published files would be rejected as truncated.
+        var sumOfFloors = options.MinimumEncoderBytes + options.MinimumDecoderBytes
+            + options.MinimumJoinerBytes + options.MinimumTokensBytes + options.MinimumVadBytes;
+        Assert.True(sumOfFloors < options.ApproximateDownloadBytes);
     }
 
     [Fact]
@@ -168,7 +192,7 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
             Path.Combine(_dir, SpeechModelOptions.FileName),
             """
             {
-              "modelId": "mirrored-zipformer",
+              "modelId": "mirrored-parakeet",
               "encoderUrl": "https://mirror.internal/encoder.onnx",
               "minimumEncoderBytes": 1234,
               "vadSha256": null
@@ -181,7 +205,7 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
         Assert.Equal("https://mirror.internal/encoder.onnx", options.EncoderUrl);
         Assert.Equal(1234, options.MinimumEncoderBytes);
         Assert.Null(options.VadSha256);
-        Assert.StartsWith("mirrored-zipformer", Path.GetFileName(bootstrapper.EncoderPath), StringComparison.Ordinal);
+        Assert.StartsWith("mirrored-parakeet", Path.GetFileName(bootstrapper.EncoderPath), StringComparison.Ordinal);
 
         // Unspecified members keep the upstream defaults rather than resetting to null or zero.
         Assert.Equal(SpeechModelOptions.Default.DecoderUrl, options.DecoderUrl);
@@ -223,15 +247,15 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
 
     /// <summary>
     /// Files at the size the bootstrapper's floors demand. Written by length rather than by
-    /// content: the encoder floor is 50 MB, and setting the length leaves the filesystem to
+    /// content: the encoder floor is 400 MB, and setting the length leaves the filesystem to
     /// account for the space instead of this test writing it a megabyte at a time.
     /// </summary>
     private static void WriteFullSizeModel(SpeechModelBootstrapper bootstrapper)
     {
-        WriteFile(bootstrapper.EncoderPath, 50_000_000);
-        WriteFile(bootstrapper.DecoderPath, 500_000);
-        WriteFile(bootstrapper.JoinerPath, 100_000);
-        WriteFile(bootstrapper.TokensPath, 1_000);
+        WriteFile(bootstrapper.EncoderPath, 400_000_000);
+        WriteFile(bootstrapper.DecoderPath, 3_000_000);
+        WriteFile(bootstrapper.JoinerPath, 500_000);
+        WriteFile(bootstrapper.TokensPath, 2_000);
         WriteFile(bootstrapper.VadPath, 1_000_000);
     }
 

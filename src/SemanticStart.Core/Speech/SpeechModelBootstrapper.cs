@@ -11,7 +11,7 @@ namespace SemanticStart.Core.Speech;
 /// settings page can show one bar.
 ///
 /// <para>
-/// No model is committed to the repository. A speech model is tens of megabytes of binary that
+/// No model is committed to the repository. A speech model is hundreds of megabytes of binary that
 /// every clone would carry forever, and the release zip would grow by the same amount for users
 /// who never dictate. Downloading it also keeps the decision where it belongs: dictation is opt-in
 /// and the download is what the user is consenting to.
@@ -23,11 +23,27 @@ namespace SemanticStart.Core.Speech;
 /// <list type="bullet">
 ///   <item>
 ///     <description>
-///     <c>sherpa-onnx-streaming-zipformer-en-2023-06-26</c> (Apache-2.0), the int8-quantised
-///     encoder/decoder/joiner and their token table: about 73 MB in total, which is the same order
-///     as the 90 MB embedding model already downloaded on first run. Trained on LibriSpeech by the
-///     Next-gen Kaldi project; the float32 encoder alone is 262 MB, which is the reason the
-///     quantised files are the ones named here.
+///     <c>sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms</c>, the int8-quantised
+///     encoder/decoder/joiner and their token table: 663,048,978 bytes in total (encoder
+///     654,046,389 bytes; decoder 7,257,777 bytes; joiner 1,735,860 bytes; tokens.txt 8,952
+///     bytes), as published by the sherpa-onnx project in the <c>asr-models</c> release on
+///     <c>k2-fsa/sherpa-onnx</c> - a single <c>.tar.bz2</c> archive there, mirrored file-by-file
+///     (identical content, individually fetchable over plain HTTPS, no archive extraction
+///     needed) on Hugging Face under <c>csukuangfj2</c>, which is what
+///     <see cref="SpeechModelOptions.EncoderUrl"/> and the other model URLs point at. Exported from NVIDIA's
+///     <c>nvidia/parakeet-unified-en-0.6b</c> (a 0.6B-parameter streaming FastConformer-RNNT
+///     transducer) with a 560 ms chunk latency. The sherpa-onnx export code is Apache-2.0, but
+///     the model weights themselves are governed by the
+///     <see href="https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/">
+///     NVIDIA Open Model License</see> - see the model card at
+///     <see href="https://huggingface.co/nvidia/parakeet-unified-en-0.6b"/> - which is a separate,
+///     more restrictive license than the rest of this download and is why <c>README.md</c> links
+///     it at the point the download is described rather than only naming it here. NVIDIA's model
+///     card additionally discloses: it was trained in part on voice data collected with consent
+///     and reviewed for privacy compliance; it has been evaluated across age, gender and
+///     linguistic-background groups for bias; it carries no life-critical use restriction beyond
+///     the license itself; and - like any ASR model - its transcripts are not guaranteed accurate
+///     and accuracy varies with accent, noise and domain.
 ///     </description>
 ///   </item>
 ///   <item>
@@ -40,7 +56,7 @@ namespace SemanticStart.Core.Speech;
 ///   </item>
 /// </list>
 /// <para>
-/// The Zipformer files are checked by size rather than by hash: the hashes are not published
+/// The Parakeet files are checked by size rather than by hash: the hashes are not published
 /// alongside the model, and a hash recorded from one download here would be a claim about that
 /// download rather than about the model. Both are served over HTTPS from the projects' own
 /// hosting.
@@ -228,7 +244,7 @@ public sealed class SpeechModelBootstrapper
     ///
     /// <para>
     /// Defender's real-time protection scans a file when the last handle on it closes, and an
-    /// on-access scan of a 60 MB model holds the file open for long enough that the move that
+    /// on-access scan of a 600+ MB model holds the file open for long enough that the move that
     /// follows immediately can lose the race and fail with <see cref="IOException"/> or
     /// <see cref="UnauthorizedAccessException"/>. The lock is transient, so a short backoff clears
     /// it; a lock that outlasts the backoff is a real failure (a quarantined file, a locked

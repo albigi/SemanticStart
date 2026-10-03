@@ -4,43 +4,23 @@ namespace SemanticStart.Tests;
 
 public sealed class SpeechRecognitionConfigTests
 {
-    [Theory]
-    [InlineData(1)]
-    [InlineData(8)]
-    [InlineData(16)]
-    public void BeamWidthCanBeTunedWithoutChangingEndpointing(int paths)
-    {
-        var files = new SpeechModelFiles("encoder", "decoder", "joiner", "tokens", "vad");
-        var config = SherpaOnnxSpeechTranscriber.CreateConfig(files, paths);
-
-        Assert.Equal(paths, config.MaxActivePaths);
-        Assert.Equal("modified_beam_search", config.DecodingMethod);
-        Assert.Equal(0, config.EnableEndpoint);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    [InlineData(17)]
-    [InlineData(int.MaxValue)]
-    public void InvalidBeamWidthsAreRejectedBeforeNativeRecognizerCreation(int paths)
-    {
-        var files = new SpeechModelFiles("encoder", "decoder", "joiner", "tokens", "vad");
-        Assert.Throws<ArgumentOutOfRangeException>(() => SherpaOnnxSpeechTranscriber.CreateConfig(files, paths));
-    }
-
+    /// <summary>
+    /// The native Parakeet Unified recognizer only implements greedy decoding; asking it for
+    /// <c>modified_beam_search</c> is a fatal (process-exiting) error on the native side rather
+    /// than a recoverable one, so this is pinned as a regression guard rather than a preference.
+    /// </summary>
     [Fact]
-    public void StreamingRecognitionKeepsAlternativeWordSequences()
+    public void StreamingRecognitionUsesGreedyDecodingWithEndpointingDisabled()
     {
         var files = new SpeechModelFiles("encoder", "decoder", "joiner", "tokens", "vad");
 
         var config = SherpaOnnxSpeechTranscriber.CreateConfig(files);
 
-        Assert.Equal("modified_beam_search", config.DecodingMethod);
-        Assert.Equal(4, config.MaxActivePaths);
+        Assert.Equal("greedy_search", config.DecodingMethod);
         Assert.Equal(2, config.ModelConfig.NumThreads);
         Assert.Equal(0, config.EnableEndpoint);
         Assert.Equal(16000, config.FeatConfig.SampleRate);
+        Assert.Equal(128, config.FeatConfig.FeatureDim);
         Assert.Equal(files.EncoderPath, config.ModelConfig.Transducer.Encoder);
         Assert.Equal(files.DecoderPath, config.ModelConfig.Transducer.Decoder);
         Assert.Equal(files.JoinerPath, config.ModelConfig.Transducer.Joiner);

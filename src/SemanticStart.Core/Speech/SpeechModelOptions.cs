@@ -7,7 +7,7 @@ namespace SemanticStart.Core.Speech;
 ///
 /// <para>
 /// Separated from <see cref="SpeechModelBootstrapper"/> so the download logic holds no literals:
-/// a different mirror, an air-gapped internal host, or a newer Zipformer revision is then a data
+/// a different mirror, an air-gapped internal host, or a newer model revision is then a data
 /// change rather than a code change. The defaults are the published upstream locations, so the
 /// ordinary case needs no file at all.
 /// </para>
@@ -19,34 +19,46 @@ namespace SemanticStart.Core.Speech;
 /// composed by hand in <c>App.OnStartup</c> - so they would add a dependency without adding the
 /// lifetime management that is the reason to take one.
 /// </para>
+/// <para>
+/// <b>Licensing.</b> The code that reads these files (sherpa-onnx) is Apache-2.0, but the encoder,
+/// decoder and joiner weights at <see cref="EncoderUrl"/>/<see cref="DecoderUrl"/>/
+/// <see cref="JoinerUrl"/> are exported from NVIDIA's <c>nvidia/parakeet-unified-en-0.6b</c> and are
+/// governed by the separate NVIDIA Open Model License
+/// (<see href="https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/"/>,
+/// model card at <see href="https://huggingface.co/nvidia/parakeet-unified-en-0.6b"/>), not by
+/// sherpa's license. A user enabling dictation is agreeing to that license for the model weights,
+/// which is why the download only happens after the Settings consent gate - see
+/// <c>SherpaOnnxSpeechProvider</c> - and why the terms are linked from <c>README.md</c> at the
+/// point the download is described.
+/// </para>
 /// </summary>
 public sealed record SpeechModelOptions
 {
     /// <summary>The file read by <see cref="Load"/> when it exists.</summary>
     public const string FileName = "speech-model.json";
 
-    private const string ZipformerBaseUrl =
-        "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main/";
+    // The sherpa-onnx project publishes this model as a single .tar.bz2 GitHub release asset (in
+    // the "asr-models" release on k2-fsa/sherpa-onnx), which is not fetchable file-by-file over
+    // plain HTTP and would need a bzip2/tar dependency this app does not otherwise have. The same
+    // four files are mirrored individually - unarchived - on Hugging Face under csukuangfj2's
+    // account, which is how every other model this bootstrapper fetches is hosted, so one URL
+    // scheme (plain HTTPS GET, no archive extraction) covers all of them.
+    private const string ParakeetBaseUrl =
+        "https://huggingface.co/csukuangfj2/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms/resolve/main/";
 
     /// <summary>
     /// Identifies the model on disk and in traces. Part of every downloaded file's name, so two
     /// revisions can sit side by side and switching back does not re-download.
     /// </summary>
-    public string ModelId { get; init; } = "sherpa-onnx-streaming-zipformer-en-2023-06-26";
+    public string ModelId { get; init; } = "sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms";
 
-    public string EncoderUrl { get; init; } = ZipformerBaseUrl + "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
+    public string EncoderUrl { get; init; } = ParakeetBaseUrl + "encoder.int8.onnx";
 
-    public string DecoderUrl { get; init; } = ZipformerBaseUrl + "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
+    public string DecoderUrl { get; init; } = ParakeetBaseUrl + "decoder.int8.onnx";
 
-    public string JoinerUrl { get; init; } = ZipformerBaseUrl + "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
+    public string JoinerUrl { get; init; } = ParakeetBaseUrl + "joiner.int8.onnx";
 
-    public string TokensUrl { get; init; } = ZipformerBaseUrl + "tokens.txt";
-
-    /// <summary>
-    /// Beam-search hypotheses retained during decoding (1-16). More paths may improve recognition
-    /// at the cost of CPU time; four remains the default.
-    /// </summary>
-    public int MaxActivePaths { get; init; } = 4;
+    public string TokensUrl { get; init; } = ParakeetBaseUrl + "tokens.txt";
 
     /// <summary>Silero VAD v5.1, pinned to a tag so a released build's model cannot change.</summary>
     public string VadUrl { get; init; } =
@@ -61,22 +73,41 @@ public sealed record SpeechModelOptions
 
     /// <summary>
     /// Size floors, in bytes. A truncated download is the failure these catch: it leaves a file
-    /// that exists, so existence alone would be taken as "already downloaded" forever. The
-    /// Zipformer files are checked by size rather than by hash because upstream publishes no
-    /// hashes, and one recorded here would be a claim about one download rather than the model.
+    /// that exists, so existence alone would be taken as "already downloaded" forever. The model
+    /// files are checked by size rather than by hash because upstream publishes no hashes for them,
+    /// and one recorded here would be a claim about one download rather than the model.
+    ///
+    /// <para>
+    /// Floors are set well below the files' actual published sizes - encoder.int8.onnx is
+    /// 654,046,389 bytes, decoder.int8.onnx is 7,257,777 bytes, joiner.int8.onnx is 1,735,860
+    /// bytes and tokens.txt is 8,952 bytes (total 663,048,978 bytes before the separate Silero
+    /// VAD), measured directly from the sherpa-onnx project's <c>asr-models</c> release archive
+    /// for this model, whose contents the Hugging Face mirror at <see cref="EncoderUrl"/> serves
+    /// unarchived and unchanged - rather than at the real sizes, so a future patch release that
+    /// changes the exact byte count by a few percent does not turn into a false "truncated
+    /// download" rejection.
+    /// </para>
     /// </summary>
-    public long MinimumEncoderBytes { get; init; } = 50_000_000;
+    public long MinimumEncoderBytes { get; init; } = 400_000_000;
 
-    public long MinimumDecoderBytes { get; init; } = 500_000;
+    public long MinimumDecoderBytes { get; init; } = 3_000_000;
 
-    public long MinimumJoinerBytes { get; init; } = 100_000;
+    public long MinimumJoinerBytes { get; init; } = 500_000;
 
-    public long MinimumTokensBytes { get; init; } = 1_000;
+    public long MinimumTokensBytes { get; init; } = 2_000;
 
     public long MinimumVadBytes { get; init; } = 1_000_000;
 
-    /// <summary>What the user is told they are about to download, before it starts.</summary>
-    public long ApproximateDownloadBytes { get; init; } = 75L * 1024 * 1024;
+    /// <summary>
+    /// What the user is told they are about to download, before it starts: the measured
+    /// encoder+decoder+joiner+tokens total of 663,048,978 bytes above, plus the Silero VAD
+    /// (~2.2 MB, unchanged by this model swap), rounded to a number comfortable to show in a
+    /// sentence - about 665 MB (decimal) / 634 MiB - rather than the compressed size of the
+    /// upstream .tar.bz2 archive, which this app never downloads as a unit. About nine times the
+    /// ~75 MB streaming Zipformer it replaces, because the 0.6B-parameter Conformer encoder is
+    /// roughly nine times the parameter count of the small streaming Zipformer.
+    /// </summary>
+    public long ApproximateDownloadBytes { get; init; } = 665_000_000L;
 
     /// <summary>The upstream defaults, used whenever no override file is present.</summary>
     public static SpeechModelOptions Default { get; } = new();

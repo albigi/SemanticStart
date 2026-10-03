@@ -4,7 +4,9 @@ using SherpaOnnx;
 namespace SemanticStart.Core.Speech;
 
 /// <summary>
-/// The streaming Zipformer transducer from sherpa-onnx (Apache-2.0), running on the CPU.
+/// The streaming NVIDIA Parakeet (NeMo) transducer from sherpa-onnx (Apache-2.0 export code; the
+/// model weights are NVIDIA Open Model License - see <see cref="SpeechModelOptions"/>), running on
+/// the CPU.
 ///
 /// <para>
 /// Streaming is the whole reason for this engine rather than a batch one. Results arrive while
@@ -21,20 +23,44 @@ public sealed class SherpaOnnxSpeechTranscriber : ISpeechTranscriber
     private readonly OnlineRecognizer _recognizer;
     private bool _disposed;
 
-    public SherpaOnnxSpeechTranscriber(SpeechModelFiles files, SpeechProviderMetadata metadata, int maxActivePaths = 4)
+    public SherpaOnnxSpeechTranscriber(SpeechModelFiles files, SpeechProviderMetadata metadata)
     {
         ArgumentNullException.ThrowIfNull(files);
         Metadata = metadata;
-        _recognizer = new OnlineRecognizer(CreateConfig(files, maxActivePaths));
+        _recognizer = new OnlineRecognizer(CreateConfig(files));
     }
 
-    internal static OnlineRecognizerConfig CreateConfig(SpeechModelFiles files, int maxActivePaths = 4)
+    /// <summary>
+    /// Builds the native recognizer config for the streaming Parakeet Unified model.
+    ///
+    /// <para>
+    /// sherpa-onnx auto-detects this exact model from metadata it reads out of
+    /// <see cref="SpeechModelFiles.DecoderPath"/> (a <c>streaming_model_type</c> field the export
+    /// script writes) and, on a match, routes construction to its dedicated
+    /// <c>OnlineRecognizerTransducerNeMoParakeetUnifiedImpl</c> rather than the generic transducer
+    /// path the previous Zipformer model used - see
+    /// <c>sherpa-onnx/csrc/online-recognizer-impl.cc</c> in sherpa-onnx 1.13.4. No separate
+    /// <c>ModelType</c> string needs to be set here as a result: the encoder/decoder/joiner/tokens
+    /// paths below are everything the native side needs to pick the right implementation.
+    /// </para>
+    /// <para>
+    /// That dedicated implementation only implements greedy decoding - requesting
+    /// <c>modified_beam_search</c> against it is a fatal error on the native side
+    /// (<c>SHERPA_ONNX_EXIT</c>), not a recoverable one - so unlike the Zipformer model this
+    /// replaces, there is no beam width to tune here. Parakeet's accuracy comes from the acoustic
+    /// model rather than from keeping alternative hypotheses, which is also why its output already
+    /// carries natural casing and punctuation rather than the shouted, unpunctuated LibriSpeech
+    /// style <see cref="SpeechTextFormatter"/> was written to clean up.
+    /// </para>
+    /// </summary>
+    internal static OnlineRecognizerConfig CreateConfig(SpeechModelFiles files)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(maxActivePaths, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(maxActivePaths, 16);
         var config = new OnlineRecognizerConfig();
         config.FeatConfig.SampleRate = MonoFloatResampler.TargetSampleRate;
-        config.FeatConfig.FeatureDim = 80;
+        // Overridden to 128 by the native recognizer once it reads the model's own feature
+        // dimension (NeMo's Conformer front end uses 128 mel bins, not the 80 the Zipformer model
+        // used); set explicitly here anyway so this config is correct to read on its own.
+        config.FeatConfig.FeatureDim = 128;
         config.ModelConfig.Transducer.Encoder = files.EncoderPath;
         config.ModelConfig.Transducer.Decoder = files.DecoderPath;
         config.ModelConfig.Transducer.Joiner = files.JoinerPath;
@@ -45,9 +71,9 @@ public sealed class SherpaOnnxSpeechTranscriber : ISpeechTranscriber
         // that a dictation session does not make the rest of the machine stutter. This runs on a
         // user's foreground machine while they are waiting to search, not on a transcription box.
         config.ModelConfig.NumThreads = 2;
-        // Keep alternative word sequences instead of committing to each locally best token.
-        config.DecodingMethod = "modified_beam_search";
-        config.MaxActivePaths = maxActivePaths;
+        // The only decoding method the native Parakeet Unified implementation supports; see the
+        // remarks above.
+        config.DecodingMethod = "greedy_search";
 
         // The recognizer's own endpointing is off: Silero decides when the utterance has ended,
         // because that decision is shared with the level meter and the listening indicator and is
@@ -117,11 +143,11 @@ public sealed class SherpaOnnxSpeechTranscriber : ISpeechTranscriber
 /// Makes engine output look like something a person typed into a search box.
 ///
 /// <para>
-/// The LibriSpeech-trained Zipformer emits unpunctuated upper case - "FREE UP DISK SPACE" -
-/// because that is how its training transcripts are written. Search is case-insensitive, so this
-/// is purely about what the user reads back: shouted text in the query box reads as a bug, and it
-/// is also not what they would have typed, which matters because the box is editable after
-/// dictation.
+/// Parakeet, unlike the LibriSpeech-trained Zipformer this app previously used, emits its own
+/// casing and punctuation directly - it does not need this step to turn "FREE UP DISK SPACE" into
+/// something readable. The all-upper-case fallback below is kept anyway as a defensive case for
+/// any provider (present or future) that does emit shouted, unpunctuated text: search is
+/// case-insensitive, so this is purely about what the user reads back in an editable query box.
 /// </para>
 /// </summary>
 internal static class SpeechTextFormatter
@@ -133,8 +159,9 @@ internal static class SpeechTextFormatter
 
         var trimmed = text.Trim();
 
-        // Only fold case when the engine has given us nothing but upper case. A provider that
-        // already cases its output - Windows AI Speech does - must be passed through untouched.
+        // Only fold case when the engine has given us nothing but upper case. A provider whose
+        // output is already properly cased - Parakeet, and Windows AI Speech - is passed through
+        // untouched.
         var hasLower = trimmed.Any(char.IsLower);
         return hasLower ? trimmed : trimmed.ToLower(System.Globalization.CultureInfo.CurrentCulture);
     }

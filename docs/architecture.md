@@ -190,7 +190,7 @@ All under `%LOCALAPPDATA%\SemanticStart` (`AppPaths.Root`, overridable with `SEM
 |---|---|
 | `index.sqlite` | Entities, enrichment documents, profiles, FTS5 mirror, usage stats |
 | `vectors.bin` | L2-normalized 384-d embeddings, row-major |
-| `models/` | `all-MiniLM-L6-v2` for the index; the Zipformer and Silero models for dictation |
+| `models/` | `all-MiniLM-L6-v2` for the index; the Parakeet and Silero models for dictation |
 | `cache/enrichment/`, `cache/icons/` | Cached online payloads and extracted shell icons |
 | `settings.json` | `AppSettings` |
 | `logs/app.log` | The single log, `INFO` / `TRACE` / `ERROR` lines |
