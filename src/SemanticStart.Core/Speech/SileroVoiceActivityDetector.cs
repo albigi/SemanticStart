@@ -14,10 +14,9 @@ namespace SemanticStart.Core.Speech;
 /// it costs one more session rather than another native dependency.
 /// </para>
 /// <para>
-/// The model is the v5 graph: it takes a frame of exactly <see cref="FrameSampleCount"/> samples at
-/// 16 kHz along with a carried recurrent state, and returns one speech probability. The state is
-/// what makes it a sequence model rather than a per-frame classifier, so it belongs to one
-/// utterance and is cleared by <see cref="Reset"/>.
+/// The model is the v5 graph: each 512-sample frame at 16 kHz is preceded by 64 context samples,
+/// along with a carried recurrent state, and returns one speech probability. Both context and
+/// recurrent state belong to one utterance and are cleared by <see cref="Reset"/>.
 /// </para>
 /// </summary>
 public sealed class SileroVoiceActivityDetector : IVoiceActivityDetector
@@ -29,6 +28,7 @@ public sealed class SileroVoiceActivityDetector : IVoiceActivityDetector
 
     private readonly InferenceSession _session;
     private readonly long[] _sampleRate = [MonoFloatResampler.TargetSampleRate];
+    private readonly SileroFrameBuffer _frames = new();
     private float[] _state = new float[2 * StateDimensions];
     private bool _disposed;
 
@@ -67,12 +67,7 @@ public sealed class SileroVoiceActivityDetector : IVoiceActivityDetector
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (frame.Length != FrameSampleCount)
-            throw new ArgumentException($"Silero VAD expects frames of exactly {FrameSampleCount} samples.", nameof(frame));
-
-        var input = new DenseTensor<float>(new[] { 1, FrameSampleCount });
-        for (var i = 0; i < FrameSampleCount; i++)
-            input[0, i] = frame[i];
+        var input = _frames.Accept(frame);
 
         var state = new DenseTensor<float>(_state, [2, 1, StateDimensions]);
 
@@ -99,7 +94,11 @@ public sealed class SileroVoiceActivityDetector : IVoiceActivityDetector
     }
 
     /// <summary>Forgets the current utterance. Call before each dictation session.</summary>
-    public void Reset() => _state = new float[2 * StateDimensions];
+    public void Reset()
+    {
+        _state = new float[2 * StateDimensions];
+        _frames.Reset();
+    }
 
     public void Dispose()
     {
@@ -108,5 +107,28 @@ public sealed class SileroVoiceActivityDetector : IVoiceActivityDetector
 
         _session.Dispose();
         _disposed = true;
+    }
+
+    /// <summary>The v5.1 ONNX wrapper's 64-sample lookback at 16 kHz, independent of model inference.</summary>
+    internal sealed class SileroFrameBuffer
+    {
+        internal const int ContextSamples = 64;
+        private readonly float[] _context = new float[ContextSamples];
+
+        internal DenseTensor<float> Accept(ReadOnlySpan<float> frame)
+        {
+            if (frame.Length != SileroVoiceActivityDetector.FrameSampleCount)
+                throw new ArgumentException(
+                    $"Silero VAD expects frames of exactly {SileroVoiceActivityDetector.FrameSampleCount} samples.",
+                    nameof(frame));
+
+            var samples = new float[ContextSamples + frame.Length];
+            _context.CopyTo(samples, 0);
+            frame.CopyTo(samples.AsSpan(ContextSamples));
+            frame[^ContextSamples..].CopyTo(_context);
+            return new DenseTensor<float>(samples, [1, samples.Length]);
+        }
+
+        internal void Reset() => Array.Clear(_context);
     }
 }

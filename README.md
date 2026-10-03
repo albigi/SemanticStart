@@ -230,8 +230,11 @@ button copies what you can actually paste and run.
 Dictation types into the search box by voice. Press **Win+Alt+/** (or the microphone button in the
 overlay footer) and speak; the words appear in the query as you say them, and the search runs when
 you stop. It is a way of filling the same query box - ranking, launching, and every shortcut above
-behave exactly as they do when typing - and spoken text is added after whatever is already there, so
-a query can be half typed and half spoken.
+behave exactly as they do when typing. Spoken text is added after keyboard-entered text, so a query
+can be half typed and half spoken. Starting another turn replaces the previous unedited dictation,
+keeping the typed prefix. Editing the query by keyboard preserves the whole edited query on the next
+turn; edits made while listening also take precedence over that turn's remaining transcripts.
+The **Clear search** button beside the query box erases either kind of input and stops listening.
 
 It is off until you turn it on in Settings, because enabling it downloads about 75 MB of speech
 model. Once on, the recogniser is loaded at startup and kept in memory, so pressing the hotkey
@@ -246,7 +249,9 @@ fresh press instead, so the microphone never opens minutes after the key that as
 
 **Everything runs on this device.** Audio is captured by WASAPI, scored for speech by a local Silero
 VAD, and transcribed by a local sherpa-onnx streaming Zipformer - all through the same ONNX Runtime
-the index already uses. No audio is recorded to disk and none is sent anywhere. The platform's own
+the index already uses. A four-path beam search retains alternative word sequences, and synthetic
+trailing silence lets the encoder finish word endings without waiting for more microphone audio.
+No audio is recorded to disk and none is sent anywhere. The platform's own
 recognisers are deliberately not used: `Windows.Media.SpeechRecognition` falls back to Microsoft's
 online service for anything beyond a fixed grammar, `System.Speech`/SAPI is a dictation-unaware
 legacy stack, and Win+H Voice Typing is a separate UI that types into whatever has focus and sends
@@ -273,6 +278,28 @@ checksum, and the minimum sizes used to detect a truncated download — so a mir
 internal host or a newer model revision needs no rebuild. Anything the file leaves out keeps its
 default, and a file that is present but unreadable fails loudly rather than quietly falling back to
 the upstream URLs.
+
+#### Recognition tuning
+
+PR #4's four-path beam search and synthetic trailing silence remain enabled. For further tuning:
+
+- If a pause cuts off a phrase, increase **Silence that ends a phrase** in Settings (try 500–800 ms).
+  Synthetic silence finishes decoding audio already captured; it cannot recover speech after the
+  microphone has closed. The sherpa microphone example uses 800 ms for its speech endpoint rule,
+  but this app uses Silero endpointing, so the two thresholds are not equivalent.
+- Set `MaxActivePaths` to `8` in `%LOCALAPPDATA%\SemanticStart\speech-model.json`, retaining any
+  existing overrides, and restart the app to try a wider beam. Accepted values are 1–16; the default
+  remains 4. More hypotheses cost CPU and may not improve a given phrase. Check the speech timings
+  and dropped-buffer diagnostics below before increasing it further.
+- The existing model URL overrides can select a compatible streaming Zipformer model, including
+  float32 exports. Give it a distinct `ModelId` so cached int8 files are not reused, and update the
+  encoder, decoder, joiner, token URLs, minimum sizes, and download-size estimate together.
+  Larger/unquantized models require more memory and decoding time; compare representative phrases
+  rather than assuming a larger model or beam is more accurate.
+
+Silero v5.1 now receives its required 64-sample lookback before each 512-sample frame, with both
+context and recurrent state reset between turns. This corrects the VAD input rather than changing
+the selected recognition model or extending microphone capture.
 
 Known limitations:
 
