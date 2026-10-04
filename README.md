@@ -236,10 +236,14 @@ keeping the typed prefix. Editing the query by keyboard preserves the whole edit
 turn; edits made while listening also take precedence over that turn's remaining transcripts.
 The **Clear search** button beside the query box erases either kind of input and stops listening.
 
-It is off until you turn it on in Settings, because enabling it downloads about 665 MB of speech
+It is off until you turn it on in **Settings > Dictation**, because enabling it downloads about 665 MB of speech
 model and requires accepting the model weights' license (see the table below). Once on, the
 recogniser is loaded at startup and kept in memory, so pressing the hotkey starts listening
 immediately rather than loading a model in front of someone who is already talking.
+
+The Dictation tab also shows the model name, location, readiness, and size, with a **Remove model files**
+action. The General tab keeps the app's other settings; both tabs use the original settings cards
+and follow the system light/dark theme.
 
 If you press the hotkey before that is finished - on the very first run, or immediately after
 enabling it - the overlay opens and says so, showing *Getting dictation ready…* while the recogniser
@@ -261,7 +265,7 @@ audio to the cloud unless the user has found the on-device setting.
 
 | Setting | Default | What it does |
 |---|---|---|
-| Dictate into the search box | off | Registers the dictation hotkey and keeps the recogniser warm |
+| Enable dictation | off | Registers the dictation hotkey and keeps the recogniser warm |
 | Dictation hotkey | `Win+Alt+/` | Opens the overlay and starts listening; falls back to a free chord if taken |
 | Silence that ends a phrase | 220 ms | How long a pause must last before the phrase is searched |
 | Hold the hotkey to talk | off | Push-to-talk instead of press-to-start, press-to-stop |

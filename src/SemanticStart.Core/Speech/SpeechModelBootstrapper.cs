@@ -114,6 +114,27 @@ public sealed class SpeechModelBootstrapper
 
     public string VadPath => Path.Combine(_modelsDirectory, "silero_vad.onnx");
 
+    public string ModelsDirectory => _modelsDirectory;
+
+    public IReadOnlyList<string> ModelFilePaths =>
+    [
+        EncoderPath,
+        DecoderPath,
+        JoinerPath,
+        TokensPath,
+        VadPath,
+        LicensePath,
+        NoticePath,
+    ];
+
+    public long InstalledBytes => ModelFilePaths
+        .Where(File.Exists)
+        .Sum(path => new FileInfo(path).Length);
+
+    public bool HasModelFiles => ModelFilePaths
+        .SelectMany(path => new[] { path, path + ".tmp" })
+        .Any(File.Exists);
+
     public string LicensePath => Path.Combine(_modelsDirectory, Options.ModelId + "-LICENSE.txt");
 
     public string NoticePath => Path.Combine(_modelsDirectory, Options.ModelId + "-Notice.txt");
@@ -161,6 +182,23 @@ public sealed class SpeechModelBootstrapper
             && !text.Contains("<html", StringComparison.OrdinalIgnoreCase)
             && !text.Contains("<body", StringComparison.OrdinalIgnoreCase)
             && (Options.LicenseSha256 is null || MatchesSha256(path, Options.LicenseSha256));
+    }
+
+    public void DeleteModelFiles()
+    {
+        var root = Path.GetFullPath(_modelsDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+
+        foreach (var path in ModelFilePaths.SelectMany(path => new[] { path, path + ".tmp" }))
+        {
+            var fullPath = Path.GetFullPath(path);
+            if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Speech model files must be inside the models directory.");
+
+            if (File.Exists(fullPath))
+                File.Delete(fullPath);
+        }
     }
 
     public async Task<SpeechModelFiles> EnsureAsync(

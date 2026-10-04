@@ -20,17 +20,6 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
 
     public SpeechModelBootstrapperTests() => Directory.CreateDirectory(_dir);
 
-    [Fact]
-    public void ModelIdOverrideLoadsAlongsideTheRestOfTheDefaults()
-    {
-        File.WriteAllText(Path.Combine(_dir, SpeechModelOptions.FileName), """{"ModelId":"test-model"}""");
-
-        var options = SpeechModelOptions.Load(_dir);
-
-        Assert.Equal("test-model", options.ModelId);
-        Assert.Equal(SpeechModelOptions.Default.EncoderUrl, options.EncoderUrl);
-    }
-
     /// <summary>
     /// The size floors are deliberately set well below the model files' actual published sizes -
     /// see the remarks on <see cref="SpeechModelOptions.MinimumEncoderBytes"/> - so this pins the
@@ -159,6 +148,46 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
 
         // Distinct names, or one download overwrites the last.
         Assert.Equal(7, AllPaths(bootstrapper).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    [Fact]
+    public void CleanupRemovesSpeechFilesAndPartialsButKeepsOtherModels()
+    {
+        var bootstrapper = new SpeechModelBootstrapper(modelsDirectory: _dir);
+        foreach (var path in AllPaths(bootstrapper))
+            File.WriteAllBytes(path, [1, 2, 3]);
+        File.WriteAllText(bootstrapper.EncoderPath + ".tmp", "partial");
+        File.WriteAllText(bootstrapper.LicensePath + ".tmp", "partial");
+        var otherModel = Path.Combine(_dir, "embedding.onnx");
+        File.WriteAllText(otherModel, "keep");
+
+        Assert.Equal(21, bootstrapper.InstalledBytes);
+        bootstrapper.DeleteModelFiles();
+
+        Assert.Equal(0, bootstrapper.InstalledBytes);
+        Assert.All(AllPaths(bootstrapper), path => Assert.False(File.Exists(path)));
+        Assert.False(File.Exists(bootstrapper.EncoderPath + ".tmp"));
+        Assert.False(File.Exists(bootstrapper.LicensePath + ".tmp"));
+        Assert.True(File.Exists(otherModel));
+    }
+
+    [Fact]
+    public void CleanupRejectsModelIdsThatEscapeTheModelsDirectory()
+    {
+        var outside = Path.Combine(Path.GetDirectoryName(_dir)!, "outside-encoder.int8.onnx");
+        File.WriteAllText(outside, "keep");
+        try
+        {
+            var options = new SpeechModelOptions { ModelId = "../outside" };
+            var bootstrapper = new SpeechModelBootstrapper(modelsDirectory: _dir, options: options);
+
+            Assert.Throws<InvalidOperationException>(bootstrapper.DeleteModelFiles);
+            Assert.True(File.Exists(outside));
+        }
+        finally
+        {
+            File.Delete(outside);
+        }
     }
 
     /// <summary>

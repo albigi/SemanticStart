@@ -13,6 +13,7 @@ public partial class SettingsWindow : Window
     private readonly ActivationManager _activationManager;
     private readonly IndexRebuildCoordinator _rebuilds;
     private readonly DictationController? _dictation;
+    private readonly Action<bool>? _dictationEnabledChanged;
 
     /// <summary>
     /// One bootstrapper for the window's lifetime. Each instance owns an <see cref="HttpClient"/>,
@@ -32,7 +33,8 @@ public partial class SettingsWindow : Window
         ActivationManager activationManager,
         IndexRebuildCoordinator rebuilds,
         bool setupMode = false,
-        DictationController? dictation = null)
+        DictationController? dictation = null,
+        Action<bool>? dictationEnabledChanged = null)
     {
         InitializeComponent();
         ThemeService.Refresh();
@@ -42,6 +44,7 @@ public partial class SettingsWindow : Window
         _activationManager = activationManager;
         _rebuilds = rebuilds;
         _dictation = dictation;
+        _dictationEnabledChanged = dictationEnabledChanged;
         _settings = settingsService.Load();
         VersionText.Text = $"SemanticStart {ProductVersion}";
         LoadControls();
@@ -321,6 +324,7 @@ public partial class SettingsWindow : Window
         _settingsService.Save(_settings);
         _activationManager.ApplySettings(_settings);
         _dictation?.ApplySettings(_settings);
+        _dictationEnabledChanged?.Invoke(_settings.DictationEnabled);
         HotKeyBox.HotKey = _settings.HotKey;
         DictationHotKeyBox.HotKey = _settings.DictationHotKey;
         _dirty = false;
@@ -354,6 +358,7 @@ public partial class SettingsWindow : Window
         if (models.IsDownloaded)
         {
             UpdateDictationStatus();
+            _ = _dictation?.WarmStartAsync();
             return;
         }
 
@@ -391,6 +396,7 @@ public partial class SettingsWindow : Window
                 _modelDownload = null;
                 download.Dispose();
             }
+            UpdateSpeechModelDetails();
         }
     }
 
@@ -408,10 +414,12 @@ public partial class SettingsWindow : Window
     /// </summary>
     private void UpdateDictationStatus()
     {
+        UpdateSpeechModelDetails();
+
         if (DictationBox.IsChecked != true)
         {
             DictationHotKeyStatus.Text = "Dictation is off.";
-            DictationStatus.Text = string.Empty;
+            DictationStatus.Text = "Dictation is disabled.";
             return;
         }
 
@@ -430,6 +438,62 @@ public partial class SettingsWindow : Window
                 : "The speech model will be downloaded when dictation is first used.";
     }
 
+    private void UpdateSpeechModelDetails()
+    {
+        SpeechModelName.Text = $"{_speechModels.ModelId} (int8)";
+        SpeechModelLocation.Text = $"Location: {_speechModels.ModelsDirectory}";
+        SpeechModelReadiness.Text = _speechModels.IsDownloaded
+            ? "Readiness: model files are ready."
+            : "Readiness: model files are missing or incomplete.";
+        SpeechModelSize.Text =
+            _speechModels.IsDownloaded
+            ? $"Size: {FormatBytes(_speechModels.InstalledBytes)} installed."
+            : $"Size: about {FormatBytes(_speechModels.Options.ApproximateDownloadBytes)} to download.";
+        RemoveSpeechModelButton.IsEnabled = _speechModels.HasModelFiles && _modelDownload is null;
+    }
+
+    private static string FormatBytes(long bytes)
+        => $"{bytes / (1024.0 * 1024.0):N1} MB";
+
+    private async void RemoveSpeechModelButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_speechModels.HasModelFiles)
+        {
+            UpdateSpeechModelDetails();
+            return;
+        }
+
+        var result = System.Windows.MessageBox.Show(
+            this,
+            "Remove the downloaded dictation model files? Dictation will be disabled and the model must be downloaded again before it can be used.",
+            "Remove dictation model",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (result != MessageBoxResult.Yes)
+            return;
+
+        DictationBox.IsChecked = false;
+        _dictation?.Stop();
+        RemoveSpeechModelButton.IsEnabled = false;
+
+        try
+        {
+            if (_dictation is not null)
+                await _dictation.UnloadAsync();
+            _speechModels.DeleteModelFiles();
+            DictationStatus.Text = "Dictation model files removed.";
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to remove dictation model files");
+            DictationStatus.Text = "The dictation model files could not be removed.";
+        }
+        finally
+        {
+            UpdateSpeechModelDetails();
+        }
+    }
+
     private void DictationHotKeyBox_HotKeyChanged(object? sender, EventArgs e)
     {
         if (!IsLoaded)
@@ -446,6 +510,16 @@ public partial class SettingsWindow : Window
 
     /// <summary>Whether Save is currently offered. Exposed so a test can check it tracks edits.</summary>
     internal bool IsSaveEnabled => SaveButton.IsEnabled;
+
+    internal string DictationSettingsTabHeader => ((TabItem)SettingsTabs.Items[1]).Header as string ?? string.Empty;
+
+    internal string SpeechModelNameText => SpeechModelName.Text;
+
+    internal string SpeechModelLocationText => SpeechModelLocation.Text;
+
+    internal string SpeechModelReadinessText => SpeechModelReadiness.Text;
+
+    internal string SpeechModelSizeText => SpeechModelSize.Text;
 
     /// <summary>Whether the "indexing runs in the background" note is showing.</summary>
     internal bool IsBackgroundNoteVisible => BackgroundNote.Visibility == Visibility.Visible;

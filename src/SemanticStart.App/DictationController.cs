@@ -7,8 +7,8 @@ using SemanticStart.Core.Speech;
 namespace SemanticStart.App;
 
 /// <summary>
-/// Connects the dictation hotkey to the overlay: keeps one warm recogniser for the life of the
-/// process, runs a listening turn on demand, and puts transcripts into the query box.
+/// Connects the dictation hotkey to the overlay: keeps a recogniser warm while dictation is enabled,
+/// runs a listening turn on demand, and puts transcripts into the query box.
 ///
 /// <para>
 /// The engine is created once at startup rather than on the first press. Loading the model is
@@ -80,10 +80,10 @@ public sealed class DictationController : IDisposable
 
     /// <summary>
     /// Cancels the warm start. Loading the engine can involve a model download, so without this a
-    /// shutdown during first run would leave an HTTP read running against a temp file until
-    /// HttpClient's own timeout, and would finish by constructing a recognizer nobody wants.
+    /// shutdown or opt-out during first run would leave an HTTP read running against a temp file
+    /// until HttpClient's own timeout, and would finish by constructing a recognizer nobody wants.
     /// </summary>
-    private readonly CancellationTokenSource _startup = new();
+    private CancellationTokenSource _startup = new();
 
     /// <summary>
     /// How many presses are currently waiting on the warm start. Model-download progress is only
@@ -126,13 +126,13 @@ public sealed class DictationController : IDisposable
 
     public void ApplySettings(AppSettings settings)
     {
-        var wasEnabled = _settings.DictationEnabled;
         _settings = settings;
 
-        if (settings.DictationEnabled && !wasEnabled)
-            _ = WarmStartAsync();
-        else if (!settings.DictationEnabled)
+        if (!settings.DictationEnabled)
+        {
             Stop();
+            _startup.Cancel();
+        }
     }
 
     /// <summary>
@@ -140,10 +140,29 @@ public sealed class DictationController : IDisposable
     /// the rest of the app works without dictation, and the reason is what the user needs when
     /// they press the hotkey and nothing happens.
     /// </summary>
-    public Task WarmStartAsync()
+    public async Task WarmStartAsync()
     {
         if (_disposed || !_settings.DictationEnabled)
-            return Task.CompletedTask;
+            return;
+
+        if (_startup.IsCancellationRequested)
+        {
+            if (_warmStart is { } cancelledWarmStart)
+                await cancelledWarmStart.ConfigureAwait(true);
+
+            if (_disposed || !_settings.DictationEnabled)
+                return;
+
+            if (_startup.IsCancellationRequested)
+            {
+                _engine?.Dispose();
+                _engine = null;
+                _warmStart = null;
+                _unavailableReason = null;
+                _startup.Dispose();
+                _startup = new CancellationTokenSource();
+            }
+        }
 
         // Task.Run rather than TaskFactory.StartNew: this is called on the UI thread, and
         // StartNew queues to TaskScheduler.Current - which is the UI scheduler whenever the caller
@@ -153,7 +172,7 @@ public sealed class DictationController : IDisposable
         // here for the same reason: the load is mostly awaited I/O, and the CPU-bound stretch is
         // short enough not to be worth a dedicated thread.
         _warmStart ??= Task.Run(CreateEngineAsync);
-        return _warmStart;
+        await _warmStart.ConfigureAwait(true);
     }
 
     /// <summary>
@@ -163,7 +182,7 @@ public sealed class DictationController : IDisposable
     /// </summary>
     public void Toggle()
     {
-        if (_disposed)
+        if (_disposed || !_settings.DictationEnabled)
             return;
 
         _showOverlay();
@@ -188,6 +207,29 @@ public sealed class DictationController : IDisposable
         // ObjectDisposedException. RunSessionAsync's finally owns the disposal.
         _session?.Cancel();
         _viewModel.EndDictation();
+    }
+
+    public async Task UnloadAsync()
+    {
+        Stop();
+        _startup.Cancel();
+
+        if (_warmStart is { } warmStart)
+            await warmStart.ConfigureAwait(true);
+
+        await _startGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            while (_session is not null)
+                await Task.Delay(20).ConfigureAwait(true);
+
+            _engine?.Dispose();
+            _engine = null;
+        }
+        finally
+        {
+            _startGate.Release();
+        }
     }
 
     public void Dispose()
@@ -247,12 +289,13 @@ public sealed class DictationController : IDisposable
     private async Task<DictationEngine?> CreateEngineAsync()
     {
         var started = Stopwatch.StartNew();
+        var startupToken = _startup.Token;
         try
         {
             var models = new SpeechModelBootstrapper();
             var selector = new SpeechEngineSelector([new SherpaOnnxSpeechProvider(models)]);
             var startup = await selector
-                .StartAsync(new Progress<double>(OnPreparationProgress), _startup.Token)
+                .StartAsync(new Progress<double>(OnPreparationProgress), startupToken)
                 .ConfigureAwait(false);
 
             // Every provider that said no, with its reason, rather than only the first one that
@@ -286,12 +329,12 @@ public sealed class DictationController : IDisposable
                 started.ElapsedMilliseconds);
             return engine;
         }
-        catch (OperationCanceledException) when (_startup.IsCancellationRequested)
+        catch (OperationCanceledException) when (startupToken.IsCancellationRequested)
         {
-            // Shutdown, not a failure. Recorded rather than dropped so a log that ends here is
+            // Cancellation, not a failure. Recorded rather than dropped so a log that ends here is
             // distinguishable from one where the load simply never finished.
             _logger.LogInformation(
-                "The dictation engine load was abandoned at shutdown after {ElapsedMs} ms.",
+                "The dictation engine load was cancelled after {ElapsedMs} ms.",
                 started.ElapsedMilliseconds);
             return null;
         }
@@ -305,6 +348,9 @@ public sealed class DictationController : IDisposable
 
     private async Task StartAsync()
     {
+        if (_disposed || !_settings.DictationEnabled)
+            return;
+
         if (!await _startGate.WaitAsync(0).ConfigureAwait(true))
         {
             // A start is already in flight. The press is still answered: on the first run that
@@ -378,8 +424,8 @@ public sealed class DictationController : IDisposable
         try
         {
             _viewModel.ReportDictationPreparing();
-            _warmStart ??= Task.Run(CreateEngineAsync);
-            return await _warmStart.ConfigureAwait(true);
+            await WarmStartAsync().ConfigureAwait(true);
+            return _engine;
         }
         finally
         {

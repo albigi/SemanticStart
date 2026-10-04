@@ -1,6 +1,9 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Threading;
 using SemanticStart.App;
+using SemanticStart.Core;
+using SemanticStart.Core.Speech;
 using Xunit;
 
 namespace SemanticStart.Tests;
@@ -29,6 +32,13 @@ public class SettingsWindowSmokeTests
         (int Lines, int BoldValues) statsShape = default;
         var statsHasSummaryRule = false;
         var setupRendered = false;
+        string? dictationTabHeader = null;
+        string? speechModelName = null;
+        string? speechModelLocation = null;
+        string? speechModelReadiness = null;
+        string? speechModelSize = null;
+        var disabledDictationButtonVisible = true;
+        var disabledDictationStartedOverlay = true;
 
         var thread = new Thread(() =>
         {
@@ -43,7 +53,7 @@ public class SettingsWindowSmokeTests
                 // This test used to pass or fail depending on whether the developer had
                 // SemanticStart open, because that shutdown closed the window under test and took
                 // every application resource with it.
-                var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                var app = Application.Current ?? new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
                 app.Resources.MergedDictionaries.Add(new ResourceDictionary
                 {
                     Source = new Uri("pack://application:,,,/SemanticStart.App;component/Theme.xaml"),
@@ -70,6 +80,26 @@ public class SettingsWindowSmokeTests
                 Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.Loaded);
 
                 hotKeyText = window.HotKeyDisplayText;
+                dictationTabHeader = window.DictationSettingsTabHeader;
+                speechModelName = window.SpeechModelNameText;
+                speechModelLocation = window.SpeechModelLocationText;
+                speechModelReadiness = window.SpeechModelReadinessText;
+                speechModelSize = window.SpeechModelSizeText;
+                var viewModel = new OverlayViewModel(searchService, new IconProvider(), settings);
+                var overlay = new OverlayWindow(viewModel);
+                overlay.SetDictationEnabled(settings.DictationEnabled);
+                disabledDictationButtonVisible = overlay.IsDictationButtonVisible;
+                var dictationOverlayShown = false;
+                using (var controller = new DictationController(
+                           Dispatcher.CurrentDispatcher,
+                           viewModel,
+                           settings,
+                           () => false,
+                           () => dictationOverlayShown = true))
+                {
+                    controller.Toggle();
+                    disabledDictationStartedOverlay = dictationOverlayShown;
+                }
 
                 // Known numbers rather than the machine's real index: this asserts the block's
                 // shape, and a test that depends on how many apps happen to be installed asserts
@@ -122,6 +152,13 @@ public class SettingsWindowSmokeTests
             string.IsNullOrWhiteSpace(hotKeyText),
             "The hotkey field was blank after rendering, so the active chord is invisible to the user.");
         Assert.Equal(new AppSettings().HotKey, hotKeyText);
+        Assert.Equal("Dictation", dictationTabHeader);
+        Assert.Contains(SpeechModelOptions.Default.ModelId, speechModelName);
+        Assert.Contains(AppPaths.ModelsDirectory, speechModelLocation);
+        Assert.Contains("Readiness:", speechModelReadiness);
+        Assert.Contains("Size:", speechModelSize);
+        Assert.False(disabledDictationButtonVisible);
+        Assert.False(disabledDictationStartedOverlay);
 
         // Six categories, six rows, and on every one a bold value in its own right-aligned column.
         // The counts are the reason to read this block, so a run-on line, an unbolded number, or a
