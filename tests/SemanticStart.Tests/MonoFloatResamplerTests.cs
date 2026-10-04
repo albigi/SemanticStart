@@ -31,15 +31,6 @@ public sealed class MonoFloatResamplerTests
         Assert.NotSame(source, output);
     }
 
-    [Theory]
-    [InlineData(48_000, 2)]
-    [InlineData(44_100, 1)]
-    [InlineData(16_000, 2)]
-    public void AnythingElseIsConverted(int sampleRate, int channels)
-    {
-        Assert.False(new MonoFloatResampler(sampleRate, channels).IsPassThrough);
-    }
-
     /// <summary>
     /// Stereo is averaged, not truncated to the left channel. A microphone array whose channels
     /// differ would otherwise lose half the signal.

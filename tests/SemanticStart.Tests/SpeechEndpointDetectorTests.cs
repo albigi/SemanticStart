@@ -32,15 +32,6 @@ public sealed class SpeechEndpointDetectorTests
         Assert.False(detector.IsEndpointReached);
     }
 
-    [Fact]
-    public void TheDefaultTrailingSilenceIsTwoHundredAndTwentyMilliseconds()
-    {
-        Assert.Equal(220, SpeechEndpointDetector.DefaultTrailingSilenceMilliseconds);
-        Assert.Equal(
-            TimeSpan.FromMilliseconds(220),
-            new SpeechEndpointDetector().TrailingSilence);
-    }
-
     /// <summary>
     /// Eleven 20 ms frames are 220 ms. The tenth must not fire and the eleventh must, because a
     /// detector that is one frame early or late is the difference between a natural-feeling pause

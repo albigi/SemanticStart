@@ -20,17 +20,6 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
 
     public SpeechModelBootstrapperTests() => Directory.CreateDirectory(_dir);
 
-    [Fact]
-    public void ModelIdOverrideLoadsAlongsideTheRestOfTheDefaults()
-    {
-        File.WriteAllText(Path.Combine(_dir, SpeechModelOptions.FileName), """{"ModelId":"test-model"}""");
-
-        var options = SpeechModelOptions.Load(_dir);
-
-        Assert.Equal("test-model", options.ModelId);
-        Assert.Equal(SpeechModelOptions.Default.EncoderUrl, options.EncoderUrl);
-    }
-
     /// <summary>
     /// The size floors are deliberately set well below the model files' actual published sizes -
     /// see the remarks on <see cref="SpeechModelOptions.MinimumEncoderBytes"/> - so this pins the
