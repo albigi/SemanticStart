@@ -108,6 +108,44 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
         Assert.Equal(5, AllPaths(bootstrapper).Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
+    [Fact]
+    public void CleanupRemovesSpeechFilesAndPartialsButKeepsOtherModels()
+    {
+        var bootstrapper = new SpeechModelBootstrapper(modelsDirectory: _dir);
+        foreach (var path in AllPaths(bootstrapper))
+            File.WriteAllBytes(path, [1, 2, 3]);
+        File.WriteAllText(bootstrapper.EncoderPath + ".tmp", "partial");
+        var otherModel = Path.Combine(_dir, "embedding.onnx");
+        File.WriteAllText(otherModel, "keep");
+
+        Assert.Equal(15, bootstrapper.InstalledBytes);
+        bootstrapper.DeleteModelFiles();
+
+        Assert.Equal(0, bootstrapper.InstalledBytes);
+        Assert.All(AllPaths(bootstrapper), path => Assert.False(File.Exists(path)));
+        Assert.False(File.Exists(bootstrapper.EncoderPath + ".tmp"));
+        Assert.True(File.Exists(otherModel));
+    }
+
+    [Fact]
+    public void CleanupRejectsModelIdsThatEscapeTheModelsDirectory()
+    {
+        var outside = Path.Combine(Path.GetDirectoryName(_dir)!, "outside-encoder.int8.onnx");
+        File.WriteAllText(outside, "keep");
+        try
+        {
+            var options = new SpeechModelOptions { ModelId = "../outside" };
+            var bootstrapper = new SpeechModelBootstrapper(modelsDirectory: _dir, options: options);
+
+            Assert.Throws<InvalidOperationException>(bootstrapper.DeleteModelFiles);
+            Assert.True(File.Exists(outside));
+        }
+        finally
+        {
+            File.Delete(outside);
+        }
+    }
+
     /// <summary>
     /// The VAD model is the one file fetched from a raw file URL rather than release hosting, and
     /// the checksum is what makes that safe, so the comparison itself is worth pinning.

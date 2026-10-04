@@ -103,8 +103,10 @@
                        VerticalAlignment="Center" />
         </StackPanel>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
-            <StackPanel>
+        <TabControl Grid.Row="1" x:Name="SettingsTabs">
+            <TabItem Header="General">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
+                    <StackPanel>
                 <!-- First run only. The first index is the expensive one, so its choices are shown
                      here before anything is built, and building waits for the button below. -->
                 <Border x:Name="SetupBanner" Style="{StaticResource Card}" Visibility="Collapsed" Margin="0,0,0,4">
@@ -133,58 +135,6 @@
                                               RecordingStarted="HotKeyBox_RecordingStarted"
                                               RecordingStopped="HotKeyBox_RecordingStopped" />
                     </Grid>
-                </Border>
-
-                <TextBlock Text="Dictation" Style="{StaticResource SectionHeader}" />
-
-                <Border Style="{StaticResource Card}">
-                    <StackPanel>
-                        <CheckBox x:Name="DictationBox" Content="Dictate into the search box" Checked="Dictation_Changed" Unchecked="Dictation_Changed" />
-                        <TextBlock Style="{StaticResource Caption}"
-                                   Text="Speech is recognised on this device by a local model. Nothing is recorded and no audio is sent anywhere. Turning this on downloads about 75 MB of model files once." />
-                        <TextBlock x:Name="DictationStatus" Style="{StaticResource Caption}" />
-                        <ProgressBar x:Name="DictationProgress" Height="4" Margin="0,8,0,0" Visibility="Collapsed"
-                                     Minimum="0" Maximum="1" />
-
-                        <Grid Margin="0,14,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="Dictation hotkey" />
-                                <TextBlock x:Name="DictationHotKeyStatus" Style="{StaticResource Caption}" TextWrapping="Wrap" />
-                            </StackPanel>
-                            <local:HotKeyRecorder x:Name="DictationHotKeyBox" Grid.Column="1" VerticalAlignment="Center"
-                                                  HotKeyChanged="DictationHotKeyBox_HotKeyChanged"
-                                                  HotKeyRejected="HotKeyBox_HotKeyRejected"
-                                                  RecordingStarted="HotKeyBox_RecordingStarted"
-                                                  RecordingStopped="DictationHotKeyBox_RecordingStopped" />
-                        </Grid>
-
-                        <Grid Margin="0,14,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="Silence that ends a phrase" />
-                                <TextBlock Text="How long a pause has to last before what you said is searched. Shorter is faster; longer survives the pause in the middle of a phrase."
-                                           Style="{StaticResource Caption}" TextWrapping="Wrap" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                <Slider x:Name="TrailingSilenceSlider" Width="180" Minimum="100" Maximum="1000" IsSnapToTickEnabled="True"
-                                        ValueChanged="Setting_ValueChanged" TickFrequency="20" VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding ElementName=TrailingSilenceSlider, Path=Value, StringFormat={}{0:F0} ms}" Width="58"
-                                           TextAlignment="Right" Margin="10,0,0,0" VerticalAlignment="Center" />
-                            </StackPanel>
-                        </Grid>
-
-                        <CheckBox x:Name="PushToTalkBox" Margin="0,14,0,0" Content="Hold the hotkey to talk instead of pressing it twice"
-                                  Checked="Setting_Changed" Unchecked="Setting_Changed" />
-                        <TextBlock Style="{StaticResource Caption}"
-                                   Text="Windows reports hotkey presses but not releases, so holding is detected by checking the key a few times a second. Listening therefore stops shortly after you let go rather than at the instant you do." />
-                    </StackPanel>
                 </Border>
 
                 <TextBlock Text="Indexing" Style="{StaticResource SectionHeader}" />
@@ -275,8 +225,79 @@
                 <Border Style="{StaticResource Card}">
                     <CheckBox x:Name="LoginBox" Content="Start SemanticStart when I sign in" Checked="Setting_Changed" Unchecked="Setting_Changed" />
                 </Border>
-            </StackPanel>
-        </ScrollViewer>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="Dictation">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
+                    <StackPanel>
+                        <TextBlock Text="Dictation" Style="{StaticResource SectionHeader}" />
+
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <CheckBox x:Name="DictationBox" Content="Enable dictation" Checked="Dictation_Changed" Unchecked="Dictation_Changed" />
+                                <TextBlock Style="{StaticResource Caption}"
+                                           Text="Speech is recognised on this device by a local model. Nothing is recorded and no audio is sent anywhere. Enabling dictation downloads the model once." />
+                                <TextBlock x:Name="DictationStatus" Style="{StaticResource Caption}" />
+                                <ProgressBar x:Name="DictationProgress" Height="4" Margin="0,8,0,0" Visibility="Collapsed"
+                                             Minimum="0" Maximum="1" />
+
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="Dictation hotkey" />
+                                        <TextBlock x:Name="DictationHotKeyStatus" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <local:HotKeyRecorder x:Name="DictationHotKeyBox" Grid.Column="1" VerticalAlignment="Center"
+                                                          HotKeyChanged="DictationHotKeyBox_HotKeyChanged"
+                                                          HotKeyRejected="HotKeyBox_HotKeyRejected"
+                                                          RecordingStarted="HotKeyBox_RecordingStarted"
+                                                          RecordingStopped="DictationHotKeyBox_RecordingStopped" />
+                                </Grid>
+
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="Silence that ends a phrase" />
+                                        <TextBlock Text="How long a pause has to last before what you said is searched. Shorter is faster; longer survives the pause in the middle of a phrase."
+                                                   Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Slider x:Name="TrailingSilenceSlider" Width="180" Minimum="100" Maximum="1000" IsSnapToTickEnabled="True"
+                                                ValueChanged="Setting_ValueChanged" TickFrequency="20" VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding ElementName=TrailingSilenceSlider, Path=Value, StringFormat={}{0:F0} ms}" Width="58"
+                                                   TextAlignment="Right" Margin="10,0,0,0" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <CheckBox x:Name="PushToTalkBox" Margin="0,14,0,0" Content="Hold the hotkey to talk instead of pressing it twice"
+                                          Checked="Setting_Changed" Unchecked="Setting_Changed" />
+                                <TextBlock Style="{StaticResource Caption}"
+                                           Text="Windows reports hotkey presses but not releases, so holding is detected by checking the key a few times a second. Listening therefore stops shortly after you let go rather than at the instant you do." />
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Text="Speech model" Style="{StaticResource SectionHeader}" />
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock x:Name="SpeechModelName" FontWeight="SemiBold" />
+                                <TextBlock x:Name="SpeechModelLocation" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="SpeechModelReadiness" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="SpeechModelSize" Style="{StaticResource Caption}" />
+                                <Button x:Name="RemoveSpeechModelButton" Content="Remove model files" Style="{StaticResource FluentButton}"
+                                        HorizontalAlignment="Left" Margin="0,12,0,0" Click="RemoveSpeechModelButton_Click" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
 
         <Grid Grid.Row="2" Margin="0,14,0,0">
             <TextBlock x:Name="VersionText" VerticalAlignment="Center" HorizontalAlignment="Left"

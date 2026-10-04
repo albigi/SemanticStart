@@ -73,6 +73,7 @@ public partial class App : System.Windows.Application
         _overlayViewModel = new OverlayViewModel(_searchService, iconProvider, settings);
         _overlayWindow = new OverlayWindow(_overlayViewModel);
         _overlayWindow.Hide();
+        _overlayWindow.SetDictationEnabled(settings.DictationEnabled);
         _overlayWindow.SettingsRequested = () => ShowSettingsWindow();
 
         _dictation = new DictationController(
@@ -106,7 +107,8 @@ public partial class App : System.Windows.Application
 
         // The recogniser is loaded now rather than on the first press of the dictation hotkey:
         // model load is the expensive part and it must not be paid by someone mid-sentence.
-        _ = _dictation.WarmStartAsync();
+        if (settings.DictationEnabled)
+            _ = _dictation.WarmStartAsync();
 
         _ = WarmStartAsync(settings);
     }
@@ -318,7 +320,14 @@ public partial class App : System.Windows.Application
             // Until the first build, every way into settings is a way into setup, so the page leads
             // with Build index wherever the user opened it from.
             var setupMode = !_settingsService.Load().SetupCompleted && _searchService.Count == 0 && !_rebuilds.IsRunning;
-            _settingsWindow = new SettingsWindow(_settingsService, _searchService, _activationManager, _rebuilds, setupMode, _dictation);
+            _settingsWindow = new SettingsWindow(
+                _settingsService,
+                _searchService,
+                _activationManager,
+                _rebuilds,
+                setupMode,
+                _dictation,
+                enabled => _overlayWindow?.SetDictationEnabled(enabled));
             _settingsWindow.Closed += (_, _) => _settingsWindow = null;
             _settingsWindow.Show();
         }

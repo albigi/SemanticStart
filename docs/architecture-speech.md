@@ -24,7 +24,7 @@ flowchart TB
         Debouncer["SearchDebouncer"]
         Telemetry["SpeechTelemetry"]
         Logger["Log → app.log"]
-        Settings["SettingsWindow<br/><i>consent gate for the download</i>"]
+        Settings["SettingsWindow<br/><i>dictation opt-in and model management</i>"]
     end
 
     subgraph core["SemanticStart.Core.Speech — no UI, no logging"]

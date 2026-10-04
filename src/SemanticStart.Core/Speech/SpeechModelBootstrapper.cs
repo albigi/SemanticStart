@@ -91,6 +91,25 @@ public sealed class SpeechModelBootstrapper
 
     public string VadPath => Path.Combine(_modelsDirectory, "silero_vad.onnx");
 
+    public string ModelsDirectory => _modelsDirectory;
+
+    public IReadOnlyList<string> ModelFilePaths =>
+    [
+        EncoderPath,
+        DecoderPath,
+        JoinerPath,
+        TokensPath,
+        VadPath,
+    ];
+
+    public long InstalledBytes => ModelFilePaths
+        .Where(File.Exists)
+        .Sum(path => new FileInfo(path).Length);
+
+    public bool HasModelFiles => ModelFilePaths
+        .SelectMany(path => new[] { path, path + ".tmp" })
+        .Any(File.Exists);
+
     /// <summary>
     /// Whether every file is already on disk, so dictation can start without a download. Read at
     /// startup to decide whether loading the engine needs the user's consent first.
@@ -101,6 +120,23 @@ public sealed class SpeechModelBootstrapper
         && IsUsableFile(JoinerPath, Options.MinimumJoinerBytes)
         && IsUsableFile(TokensPath, Options.MinimumTokensBytes)
         && IsUsableFile(VadPath, Options.MinimumVadBytes);
+
+    public void DeleteModelFiles()
+    {
+        var root = Path.GetFullPath(_modelsDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+
+        foreach (var path in ModelFilePaths.SelectMany(path => new[] { path, path + ".tmp" }))
+        {
+            var fullPath = Path.GetFullPath(path);
+            if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Speech model files must be inside the models directory.");
+
+            if (File.Exists(fullPath))
+                File.Delete(fullPath);
+        }
+    }
 
     public async Task<SpeechModelFiles> EnsureAsync(
         IProgress<double>? progress = null,

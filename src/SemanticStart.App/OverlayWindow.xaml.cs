@@ -23,6 +23,11 @@ public partial class OverlayWindow : Window
     /// <summary>Raised when listening has to stop without asking for a new turn.</summary>
     public Action? DictationStopRequested { get; set; }
 
+    public void SetDictationEnabled(bool enabled)
+        => DictationButton.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+
+    internal bool IsDictationButtonVisible => DictationButton.Visibility == Visibility.Visible;
+
     public OverlayWindow(OverlayViewModel viewModel)
     {
         InitializeComponent();
