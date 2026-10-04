@@ -446,7 +446,9 @@ public partial class SettingsWindow : Window
             ? "Readiness: model files are ready."
             : "Readiness: model files are missing or incomplete.";
         SpeechModelSize.Text =
-            $"Size: {FormatBytes(_speechModels.InstalledBytes)} installed; about {FormatBytes(_speechModels.Options.ApproximateDownloadBytes)} to download.";
+            _speechModels.IsDownloaded
+            ? $"Size: {FormatBytes(_speechModels.InstalledBytes)} installed."
+            : $"Size: about {FormatBytes(_speechModels.Options.ApproximateDownloadBytes)} to download.";
         RemoveSpeechModelButton.IsEnabled = _speechModels.HasModelFiles && _modelDownload is null;
     }
 
