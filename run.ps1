@@ -107,12 +107,12 @@ foreach ($attempt in 1..20) {
     $registration = Get-Content $log -ErrorAction SilentlyContinue |
     Select-Object -Skip $logLinesBefore |
     Select-String -Pattern 'Registered hotkey|Registered dictation hotkey|No hotkey could be registered' |
-    Select-Object -Last 1
+    Select-Object -Last 2
     if ($registration) { break }
 }
 
 if ($registration) {
-    Write-Host $registration.Line.Trim() -ForegroundColor Green
+    Write-Host ($registration.Line.Trim() -join "`n") -ForegroundColor Green
 }
 else {
     # Not a failure: the app runs from the tray and may simply have been slower than we waited.
