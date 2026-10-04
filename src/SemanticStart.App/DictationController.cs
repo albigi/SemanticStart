@@ -7,8 +7,8 @@ using SemanticStart.Core.Speech;
 namespace SemanticStart.App;
 
 /// <summary>
-/// Connects the dictation hotkey to the overlay: keeps one warm recogniser for the life of the
-/// process, runs a listening turn on demand, and puts transcripts into the query box.
+/// Connects the dictation hotkey to the overlay: keeps a recogniser warm while dictation is enabled,
+/// runs a listening turn on demand, and puts transcripts into the query box.
 ///
 /// <para>
 /// The engine is created once at startup rather than on the first press. Loading the model is
@@ -80,8 +80,8 @@ public sealed class DictationController : IDisposable
 
     /// <summary>
     /// Cancels the warm start. Loading the engine can involve a model download, so without this a
-    /// shutdown during first run would leave an HTTP read running against a temp file until
-    /// HttpClient's own timeout, and would finish by constructing a recognizer nobody wants.
+    /// shutdown or opt-out during first run would leave an HTTP read running against a temp file
+    /// until HttpClient's own timeout, and would finish by constructing a recognizer nobody wants.
     /// </summary>
     private CancellationTokenSource _startup = new();
 
@@ -331,10 +331,10 @@ public sealed class DictationController : IDisposable
         }
         catch (OperationCanceledException) when (startupToken.IsCancellationRequested)
         {
-            // Shutdown, not a failure. Recorded rather than dropped so a log that ends here is
+            // Cancellation, not a failure. Recorded rather than dropped so a log that ends here is
             // distinguishable from one where the load simply never finished.
             _logger.LogInformation(
-                "The dictation engine load was abandoned at shutdown after {ElapsedMs} ms.",
+                "The dictation engine load was cancelled after {ElapsedMs} ms.",
                 started.ElapsedMilliseconds);
             return null;
         }
