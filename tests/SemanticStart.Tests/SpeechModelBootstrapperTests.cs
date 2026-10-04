@@ -72,7 +72,7 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
     [Fact]
     public void EveryFilePresentAndFullSizeMeansDownloaded()
     {
-        var bootstrapper = new SpeechModelBootstrapper(modelsDirectory: _dir);
+        var bootstrapper = CreateBootstrapper();
         WriteFullSizeModel(bootstrapper);
 
         Assert.True(bootstrapper.IsDownloaded);
@@ -88,9 +88,11 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
     [InlineData("joiner")]
     [InlineData("tokens")]
     [InlineData("vad")]
+    [InlineData("license")]
+    [InlineData("notice")]
     public void OneMissingFileMeansNotDownloaded(string missing)
     {
-        var bootstrapper = new SpeechModelBootstrapper(modelsDirectory: _dir);
+        var bootstrapper = CreateBootstrapper();
         WriteFullSizeModel(bootstrapper);
         File.Delete(PathFor(bootstrapper, missing));
 
@@ -106,7 +108,7 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
     [InlineData("vad")]
     public void ATruncatedFileMeansNotDownloaded(string truncated)
     {
-        var bootstrapper = new SpeechModelBootstrapper(modelsDirectory: _dir);
+        var bootstrapper = CreateBootstrapper();
         WriteFullSizeModel(bootstrapper);
         WriteFile(PathFor(bootstrapper, truncated), 1_024);
 
@@ -129,7 +131,7 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
         Assert.Equal("silero_vad.onnx", Path.GetFileName(bootstrapper.VadPath));
 
         // Distinct names, or one download overwrites the last.
-        Assert.Equal(5, AllPaths(bootstrapper).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(7, AllPaths(bootstrapper).Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 
     /// <summary>
@@ -178,6 +180,8 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
         bootstrapper.JoinerPath,
         bootstrapper.TokensPath,
         bootstrapper.VadPath,
+        bootstrapper.LicensePath,
+        bootstrapper.NoticePath,
     ];
 
     /// <summary>
@@ -242,6 +246,8 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
         "joiner" => bootstrapper.JoinerPath,
         "tokens" => bootstrapper.TokensPath,
         "vad" => bootstrapper.VadPath,
+        "license" => bootstrapper.LicensePath,
+        "notice" => bootstrapper.NoticePath,
         _ => throw new ArgumentOutOfRangeException(nameof(file), file, "Unknown model file."),
     };
 
@@ -257,6 +263,178 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
         WriteFile(bootstrapper.JoinerPath, 500_000);
         WriteFile(bootstrapper.TokensPath, 2_000);
         WriteFile(bootstrapper.VadPath, 1_000_000);
+        File.WriteAllText(bootstrapper.LicensePath, new string('L', 8_000));
+        File.WriteAllText(bootstrapper.NoticePath, bootstrapper.Options.LicenseNotice + Environment.NewLine);
+    }
+
+    private SpeechModelBootstrapper CreateBootstrapper(HttpClient? client = null) =>
+        new(client, _dir, SpeechModelOptions.Default with { LicenseSha256 = null });
+
+    [Fact]
+    public async Task FirstDownloadIncludesLegalFilesAndUsesConfiguredChecksum()
+    {
+        const string license = "Complete custom model agreement for this test.";
+        var requests = new List<string>();
+        var options = SpeechModelOptions.Default with
+        {
+            ModelId = "custom-model",
+            LicenseUrl = "https://mirror.internal/LICENSE.txt",
+            LicenseSha256 = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(license))),
+            LicenseNotice = "Custom model attribution",
+            MinimumLicenseBytes = 1,
+            MinimumEncoderBytes = 1,
+            MinimumDecoderBytes = 1,
+            MinimumJoinerBytes = 1,
+            MinimumTokensBytes = 1,
+            MinimumVadBytes = 1,
+            VadSha256 = null,
+        };
+        using var client = new HttpClient(new StubHandler((request, _) =>
+        {
+            var url = request.RequestUri!.AbsoluteUri;
+            requests.Add(url);
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(url == options.LicenseUrl ? license : "model"),
+            });
+        }));
+        var bootstrapper = new SpeechModelBootstrapper(client, _dir, options);
+
+        await bootstrapper.EnsureAsync();
+
+        Assert.Equal(options.LicenseUrl, requests[0]);
+        Assert.Equal(6, requests.Count);
+        Assert.True(bootstrapper.IsDownloaded);
+        Assert.Equal(license, File.ReadAllText(bootstrapper.LicensePath));
+        Assert.Equal(options.LicenseNotice + Environment.NewLine, File.ReadAllText(bootstrapper.NoticePath));
+        File.WriteAllText(bootstrapper.LicensePath, "tampered agreement");
+        Assert.False(bootstrapper.IsDownloaded);
+    }
+
+    [Fact]
+    public async Task CachedWeightsBackfillOnlyTheLegalFiles()
+    {
+        var requests = new List<string>();
+        var license = new string('L', 8_000);
+        using var client = new HttpClient(new StubHandler((request, _) =>
+        {
+            requests.Add(request.RequestUri!.AbsoluteUri);
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(license),
+            });
+        }));
+        var bootstrapper = CreateBootstrapper(client);
+        WriteFullSizeModel(bootstrapper);
+        File.Delete(bootstrapper.LicensePath);
+        File.Delete(bootstrapper.NoticePath);
+
+        Assert.False(bootstrapper.IsDownloaded);
+        await bootstrapper.EnsureAsync();
+        await bootstrapper.EnsureAsync();
+
+        Assert.Equal([bootstrapper.Options.LicenseUrl], requests);
+        Assert.Equal(license, File.ReadAllText(bootstrapper.LicensePath));
+        Assert.Equal("Licensed by NVIDIA Corporation under the NVIDIA Open Model License" + Environment.NewLine,
+            File.ReadAllText(bootstrapper.NoticePath));
+        Assert.True(bootstrapper.IsDownloaded);
+        Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
+    }
+
+    [Fact]
+    public async Task IncorrectNoticeIsRepairedWithoutNetworkAccess()
+    {
+        using var client = new HttpClient(new StubHandler((_, _) =>
+            throw new InvalidOperationException("No downloads should be needed.")));
+        var bootstrapper = CreateBootstrapper(client);
+        WriteFullSizeModel(bootstrapper);
+        File.WriteAllText(bootstrapper.NoticePath, "wrong attribution");
+
+        Assert.False(bootstrapper.IsDownloaded);
+        await bootstrapper.EnsureAsync();
+        Assert.True(bootstrapper.IsDownloaded);
+    }
+
+    [Theory]
+    [InlineData("html")]
+    [InlineData("truncated")]
+    [InlineData("not-found")]
+    [InlineData("checksum")]
+    public async Task InvalidLicenseFailsReadinessAndCleansTempFile(string failure)
+    {
+        using var client = new HttpClient(new StubHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(failure == "not-found"
+                ? System.Net.HttpStatusCode.NotFound : System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(failure switch
+                {
+                    "html" => "<html>" + new string('L', 8_000) + "</html>",
+                    "truncated" => "short",
+                    _ => new string('L', 8_000),
+                }),
+            })));
+        var bootstrapper = failure == "checksum"
+            ? new SpeechModelBootstrapper(client, _dir)
+            : CreateBootstrapper(client);
+        WriteFullSizeModel(bootstrapper);
+        File.Delete(bootstrapper.LicensePath);
+
+        await Assert.ThrowsAsync<SpeechModelDownloadException>(() => bootstrapper.EnsureAsync());
+
+        Assert.False(bootstrapper.IsDownloaded);
+        Assert.False(File.Exists(bootstrapper.LicensePath));
+        Assert.False(File.Exists(bootstrapper.LicensePath + ".tmp"));
+        Assert.Equal(400_000_000, new FileInfo(bootstrapper.EncoderPath).Length);
+    }
+
+    [Fact]
+    public async Task CancelledLegalDownloadLeavesCachedWeightsUntouched()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var client = new HttpClient(new StubHandler((_, token) =>
+        {
+            cancellation.Cancel();
+            token.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("Cancellation should have been propagated.");
+        }));
+        var bootstrapper = CreateBootstrapper(client);
+        WriteFullSizeModel(bootstrapper);
+        File.Delete(bootstrapper.LicensePath);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            bootstrapper.EnsureAsync(cancellationToken: cancellation.Token));
+
+        Assert.False(bootstrapper.IsDownloaded);
+        Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
+        Assert.Equal(400_000_000, new FileInfo(bootstrapper.EncoderPath).Length);
+    }
+
+    [Fact]
+    public void OverridesIncludeModelSpecificLegalSourcesAndAttribution()
+    {
+        File.WriteAllText(Path.Combine(_dir, SpeechModelOptions.FileName),
+            """
+            {
+              "licenseUrl": "https://mirror.internal/LICENSE.txt",
+              "licenseSha256": null,
+              "minimumLicenseBytes": 100,
+              "licenseNotice": "Custom model attribution"
+            }
+            """);
+        var options = SpeechModelOptions.Load(_dir);
+
+        Assert.Equal("https://mirror.internal/LICENSE.txt", options.LicenseUrl);
+        Assert.Null(options.LicenseSha256);
+        Assert.Equal(100, options.MinimumLicenseBytes);
+        Assert.Equal("Custom model attribution", options.LicenseNotice);
+    }
+
+    private sealed class StubHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken) => send(request, cancellationToken);
     }
 
     private static void WriteFile(string path, long length)

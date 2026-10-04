@@ -28,8 +28,8 @@ namespace SemanticStart.Core.Speech;
 /// model card at <see href="https://huggingface.co/nvidia/parakeet-unified-en-0.6b"/>), not by
 /// sherpa's license. A user enabling dictation is agreeing to that license for the model weights,
 /// which is why the download only happens after the Settings consent gate - see
-/// <c>SherpaOnnxSpeechProvider</c> - and why the terms are linked from <c>README.md</c> at the
-/// point the download is described.
+/// <c>SherpaOnnxSpeechProvider</c>. The complete agreement and required Notice attribution are
+/// retained beside the weights; <c>README.md</c> documents their locations.
 /// </para>
 /// </summary>
 public sealed record SpeechModelOptions
@@ -59,6 +59,26 @@ public sealed record SpeechModelOptions
     public string JoinerUrl { get; init; } = ParakeetBaseUrl + "joiner.int8.onnx";
 
     public string TokensUrl { get; init; } = ParakeetBaseUrl + "tokens.txt";
+
+    /// <summary>
+    /// Complete plain-text agreement from NVIDIA's NVlabs repository, pinned to a revision.
+    /// The Parakeet model repository links the agreement but does not host a LICENSE file.
+    /// Mirrors must also supply the agreement, not the HTML agreement page.
+    /// </summary>
+    public string LicenseUrl { get; init; } =
+        "https://raw.githubusercontent.com/NVlabs/GRAIL/8b9afa5c0b10e8d26ea066c8475893eec8ea9165/imports/SONIC/decoupled_wbc/sim2mujoco/resources/robots/g1/policy/NVIDIA%20Open%20Model%20License";
+
+    public string? LicenseSha256 { get; init; } =
+        "a0c4f6a35dd2c858c86069d84140052831820e78f3074a2fb758bb4156b66994";
+
+    public long MinimumLicenseBytes { get; init; } = 8_000;
+
+    /// <summary>
+    /// Section 3.1 requires this attribution in a Notice text file alongside the weights.
+    /// Override together with the license when configuring a differently licensed model.
+    /// </summary>
+    public string LicenseNotice { get; init; } =
+        "Licensed by NVIDIA Corporation under the NVIDIA Open Model License";
 
     /// <summary>Silero VAD v5.1, pinned to a tag so a released build's model cannot change.</summary>
     public string VadUrl { get; init; } =

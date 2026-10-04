@@ -274,6 +274,20 @@ this repository:
 | Streaming Parakeet Unified 0.6B encoder/decoder/joiner (int8) + tokens | ~665 MB | `sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms`, mirrored file-by-file on [Hugging Face](https://huggingface.co/csukuangfj2/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms) from the sherpa-onnx project's `asr-models` GitHub release, exported from [`nvidia/parakeet-unified-en-0.6b`](https://huggingface.co/nvidia/parakeet-unified-en-0.6b) | Apache-2.0 for the sherpa-onnx export code; the model weights themselves are under the [NVIDIA Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/) — read it before enabling dictation |
 | Silero VAD v5.1 (`silero_vad.onnx`) | ~2.3 MB | `snakers4/silero-vad` on GitHub, pinned to a tag and verified by SHA-256 | MIT |
 
+The download also saves a complete plain-text NVIDIA Open Model License agreement as
+`<ModelId>-LICENSE.txt` and a `<ModelId>-Notice.txt` containing the exact attribution
+`Licensed by NVIDIA Corporation under the NVIDIA Open Model License`, alongside the weights in
+`%LOCALAPPDATA%\SemanticStart\models`. The agreement is fetched from a
+[pinned NVIDIA/NVlabs plain-text copy](https://raw.githubusercontent.com/NVlabs/GRAIL/8b9afa5c0b10e8d26ea066c8475893eec8ea9165/imports/SONIC/decoupled_wbc/sim2mujoco/resources/robots/g1/policy/NVIDIA%20Open%20Model%20License)
+and verified by SHA-256; it is not an HTML page saved with a `.txt` extension. Both legal files
+are required before the model is ready. Already-cached weights are kept: the next model setup
+backfills missing legal files without redownloading the weights. If you redistribute the weights,
+retain both files with them as required by section 3.1 of the agreement.
+
+SemanticStart's application code remains MIT; sherpa-onnx runtime/export code is Apache-2.0;
+the Parakeet weights are separately licensed under the NVIDIA Open Model License, not MIT or
+Apache-2.0. Silero VAD remains MIT.
+
 NVIDIA's model card for `parakeet-unified-en-0.6b` additionally discloses, among other fields: it
 was trained in part on voice data collected with consent and reviewed for privacy compliance; it
 has been evaluated for bias across age, gender and linguistic-background groups; it carries no
@@ -285,7 +299,12 @@ for anything beyond local, personal dictation.
 Those sources are defaults, not fixtures. Dropping a `speech-model.json` into
 `%LOCALAPPDATA%\SemanticStart` overrides any of them — the model id, the five URLs, the VAD
 checksum, and the minimum sizes used to detect a truncated download — so a mirror, an offline
-internal host or a newer model revision needs no rebuild. Anything the file leaves out keeps its
+internal host or a newer model revision needs no rebuild. Legal-file settings are also configurable:
+`LicenseUrl`, `LicenseSha256`, `MinimumLicenseBytes`, and `LicenseNotice`. Mirrors should serve
+the complete plain-text agreement and preserve its checksum. When switching to differently
+licensed weights, configure their agreement and attribution together (and set the appropriate
+checksum, or explicitly set it to `null`); omitted settings retain the NVIDIA defaults.
+Anything the file leaves out keeps its
 default, and a file that is present but unreadable fails loudly rather than quietly falling back to
 the upstream URLs.
 
@@ -543,4 +562,6 @@ Palette or PowerToys Run extension later.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Application code: MIT. See [LICENSE](LICENSE). Downloaded speech weights are separately governed
+by the NVIDIA Open Model License; sherpa-onnx is Apache-2.0 and Silero VAD is MIT. See the dictation
+section above for the agreement and Notice files retained alongside the weights.
