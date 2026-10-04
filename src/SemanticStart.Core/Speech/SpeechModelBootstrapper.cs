@@ -122,14 +122,30 @@ public sealed class SpeechModelBootstrapper
     /// Whether every file is already on disk, so dictation can start without a download. Read at
     /// startup to decide whether loading the engine needs the user's consent first.
     /// </summary>
-    public bool IsDownloaded =>
-        IsUsableFile(EncoderPath, Options.MinimumEncoderBytes)
-        && IsUsableFile(DecoderPath, Options.MinimumDecoderBytes)
-        && IsUsableFile(JoinerPath, Options.MinimumJoinerBytes)
-        && IsUsableFile(TokensPath, Options.MinimumTokensBytes)
-        && IsUsableFile(VadPath, Options.MinimumVadBytes)
-        && IsUsableLicense(LicensePath)
-        && HasNotice;
+    public bool IsDownloaded
+    {
+        get
+        {
+            try
+            {
+                return IsUsableFile(EncoderPath, Options.MinimumEncoderBytes)
+                    && IsUsableFile(DecoderPath, Options.MinimumDecoderBytes)
+                    && IsUsableFile(JoinerPath, Options.MinimumJoinerBytes)
+                    && IsUsableFile(TokensPath, Options.MinimumTokensBytes)
+                    && IsUsableFile(VadPath, Options.MinimumVadBytes)
+                    && IsUsableLicense(LicensePath)
+                    && HasNotice;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                SpeechDiagnostics.ReportFailure(
+                    "model.readiness",
+                    "Could not check speech model readiness because a model file could not be read.",
+                    ex);
+                return false;
+            }
+        }
+    }
 
     private bool HasNotice =>
         File.Exists(NoticePath) && File.ReadAllText(NoticePath) == Options.LicenseNotice + Environment.NewLine;

@@ -78,6 +78,33 @@ public sealed class SpeechModelBootstrapperTests : IDisposable
         Assert.True(bootstrapper.IsDownloaded);
     }
 
+    [Theory]
+    [InlineData("license")]
+    [InlineData("notice")]
+    public void UnreadableLegalFileReportsReadinessFailureAndMeansNotDownloaded(string file)
+    {
+        var bootstrapper = CreateBootstrapper();
+        WriteFullSizeModel(bootstrapper);
+        SpeechDiagnosticEvent? diagnostic = null;
+        void Capture(SpeechDiagnosticEvent report) => diagnostic = report;
+        SpeechDiagnostics.Reported += Capture;
+
+        try
+        {
+            using var lockedFile = File.Open(PathFor(bootstrapper, file), FileMode.Open, FileAccess.Read, FileShare.None);
+
+            Assert.False(bootstrapper.IsDownloaded);
+            Assert.NotNull(diagnostic);
+            Assert.Equal("model.readiness", diagnostic.Operation);
+            Assert.True(diagnostic.IsError);
+            Assert.IsAssignableFrom<IOException>(diagnostic.Exception);
+        }
+        finally
+        {
+            SpeechDiagnostics.Reported -= Capture;
+        }
+    }
+
     /// <summary>
     /// One missing file is a half-downloaded model, which loads as an error deep inside the ONNX
     /// runtime rather than as "the model is not here".
