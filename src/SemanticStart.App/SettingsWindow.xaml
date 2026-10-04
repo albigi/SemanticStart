@@ -8,6 +8,70 @@
         UseLayoutRounding="True" TextOptions.TextFormattingMode="Ideal"
         Background="{DynamicResource PanelBrush}" Foreground="{DynamicResource PrimaryTextBrush}">
     <Window.Resources>
+        <!-- Stock WPF tab chrome stays light even when the app's theme brushes change. -->
+        <Style x:Key="SettingsTabControl" TargetType="TabControl">
+            <Setter Property="Background" Value="{DynamicResource PanelBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid KeyboardNavigation.TabNavigation="Local">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TabPanel IsItemsHost="True" Margin="0,0,0,4"
+                                      KeyboardNavigation.TabIndex="1" />
+                            <Border Grid.Row="1" Background="{TemplateBinding Background}">
+                                <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent"
+                                                  KeyboardNavigation.TabIndex="2"
+                                                  KeyboardNavigation.TabNavigation="Local"
+                                                  KeyboardNavigation.DirectionalNavigation="Contained" />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="TabItem">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+            <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
+            <Setter Property="FontSize" Value="{DynamicResource BodyFontSize}" />
+            <Setter Property="Padding" Value="16,8" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Grid>
+                            <Border x:Name="HeaderBorder" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                                    CornerRadius="6" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter ContentSource="Header" RecognizesAccessKey="True"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <Border x:Name="SelectionIndicator" Background="{DynamicResource AccentBrush}"
+                                    Height="2" Width="16" CornerRadius="1" VerticalAlignment="Bottom"
+                                    Visibility="Collapsed" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="HeaderBorder" Property="Background" Value="{DynamicResource ItemHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="HeaderBorder" Property="Background" Value="{DynamicResource SearchBoxBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                                <Setter TargetName="SelectionIndicator" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="HeaderBorder" Property="BorderBrush" Value="{DynamicResource FocusStrokeBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <!-- Windows 11 settings "card": a rounded surface holding one setting. -->
         <Style x:Key="Card" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource SearchBoxBrush}" />
@@ -103,7 +167,7 @@
                        VerticalAlignment="Center" />
         </StackPanel>
 
-        <TabControl Grid.Row="1" x:Name="SettingsTabs">
+        <TabControl Grid.Row="1" x:Name="SettingsTabs" Style="{StaticResource SettingsTabControl}">
             <TabItem Header="General">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
                     <StackPanel>
