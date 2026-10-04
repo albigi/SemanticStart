@@ -176,7 +176,7 @@ public class SettingsWindowSmokeTests
 
     /// <summary>
     /// A dictation press that cannot be served yet must still be visibly acknowledged. On the
-    /// first run the gap between the press and the microphone opening is a 75 MB download, and an
+    /// first run the gap between the press and the microphone opening is a ~665 MB download, and an
     /// overlay that shows nothing in that window is indistinguishable from a hotkey that never
     /// registered - which is the bug report that would follow.
     ///

@@ -9,8 +9,10 @@ hold in mind while reading everything below.
 
 Silero v5.1 consumes 512 new samples (32 ms at 16 kHz) preceded by the previous frame's
 64-sample context. Context starts at zero and is reset along with recurrent state on each turn;
-the ONNX input is `[1, 576]`, not `[1, 512]`. Beam search still defaults to four active paths,
-with a bounded `MaxActivePaths` override in `speech-model.json` for local accuracy/CPU comparisons.
+the ONNX input is `[1, 576]`, not `[1, 512]`. The streaming Parakeet recognizer decodes with
+greedy search - its native implementation does not support beam search at all, unlike the
+streaming Zipformer this app used before - so there is no `MaxActivePaths` to tune in
+`speech-model.json` any more.
 
 ## The shape of it
 
@@ -113,7 +115,7 @@ sequenceDiagram
             Sel-->>Sel: record SpeechProviderRejection
         else available
             Sel->>Prv: CreateAsync(progress, token)
-            Prv->>Boot: EnsureAsync(...) — ~75 MB on first run
+            Prv->>Boot: EnsureAsync(...) — ~665 MB on first run
             Boot-->>Prv: SpeechModelFiles
             Prv->>Trn: new (3 ONNX sessions)
             Trn-->>Sel: ISpeechTranscriber
@@ -183,13 +185,31 @@ Two details in that diagram are load-bearing:
 | `MonoFloatResampler` | Device format → 16 kHz mono float | Stateful across buffers, so the seam between WASAPI packets does not dip |
 | `SileroVoiceActivityDetector` | Per-frame speech probability | Recurrent state, so it belongs to one session and is reset between turns |
 | `SpeechEndpointDetector` | Turns probabilities into "they have stopped" | Pure and testable; the tuning the user can see in Settings lives here |
-| `SherpaOnnxSpeechTranscriber` | Streaming Zipformer decode | Its own endpointing is disabled — two endpoint rules would race |
+| `SherpaOnnxSpeechTranscriber` | Streaming Parakeet decode | Its own endpointing is disabled — two endpoint rules would race |
 | `DictationEngine` | Wires the above into one turn | Long-lived and warm; `ListenAsync` loads nothing |
-| `SpeechModelBootstrapper` | Fetches models on first use | Mirrors `EmbeddingModelBootstrapper`: same temp file, progress and size floors |
+| `SpeechModelBootstrapper` | Fetches models and required legal files on first use | Mirrors `EmbeddingModelBootstrapper`: same temp file, progress and size floors; readiness includes the agreement and attribution |
 | `SpeechModelOptions` | Where the models come from | Holds every URL, checksum and size floor, so a mirror or a newer revision is a `speech-model.json` away rather than a rebuild |
 | `SpeechDiagnostics` | Spans + everything handled internally | Keeps Core log-free while making swallowed failures visible |
 | `DictationController` | Hotkey → overlay, session lifetime | The only place that knows about both `Dispatcher` and `DictationEngine` |
 | `SpeechTelemetry` | The one `ActivityListener` | Turns Core's spans into `TRACE` lines in the app's existing log |
+
+## Model licensing and cached upgrades
+
+Application code is MIT, sherpa-onnx runtime/export code is Apache-2.0, and Parakeet Unified
+weights are under the separate NVIDIA Open Model License. Silero VAD is MIT.
+`SpeechModelBootstrapper` downloads a complete plain-text agreement from a pinned NVIDIA/NVlabs
+source, verifies its SHA-256, and atomically saves `<ModelId>-LICENSE.txt` alongside the weights
+in `%LOCALAPPDATA%\SemanticStart\models`. It also writes `<ModelId>-Notice.txt` with the exact
+attribution `Licensed by NVIDIA Corporation under the NVIDIA Open Model License`.
+Both files are required by readiness and must accompany redistributed weights (agreement
+section 3.1); linking the web agreement alone is not a substitute.
+
+Legal files are prepared before downloading weights. Setup backfills missing legal files for
+existing caches without downloading the weights again, and reports failures rather than loading
+a model with missing legal files. Cancellation removes incomplete temp files.
+`speech-model.json` supports `LicenseUrl`, `LicenseSha256`, `MinimumLicenseBytes`, and
+`LicenseNotice` overrides for mirrors or differently licensed models. Overrides must provide a
+complete plain-text agreement, not HTML, and the appropriate attribution and checksum.
 
 ## Threading
 

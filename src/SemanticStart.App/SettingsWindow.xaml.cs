@@ -336,7 +336,7 @@ public partial class SettingsWindow : Window
     /// <summary>
     /// Turning dictation on is what authorises the model download, so the download starts here
     /// rather than at the next press of the hotkey, with its progress on screen. Anything else
-    /// leaves a user who has just enabled a feature with 75 MB of silent background traffic.
+    /// leaves a user who has just enabled a feature with ~665 MB of silent background traffic.
     /// </summary>
     private void Dictation_Changed(object sender, RoutedEventArgs e)
     {

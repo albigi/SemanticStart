@@ -60,10 +60,10 @@ Console.WriteLine(alreadyDownloaded
     ? "Model files already present on disk."
     : $"Downloading the speech model (~{SpeechModelBootstrapper.ApproximateDownloadBytes / (1024 * 1024):N0} MB) - this only happens once.");
 
-// A wall-clock limit on a 75 MB download would fail an honest slow connection, so what is bounded
-// is silence: the deadline is pushed out on every progress report, and only a transfer that has
-// actually stalled trips it. HttpClient's own 10-minute timeout covers a connection that never
-// opens; this covers one that opens and then stops.
+// A wall-clock limit on a ~665 MB download would fail an honest slow connection, so what is
+// bounded is silence: the deadline is pushed out on every progress report, and only a transfer
+// that has actually stalled trips it. HttpClient's own 10-minute timeout covers a connection that
+// never opens; this covers one that opens and then stops.
 using var stalled = new CancellationTokenSource(ProbeTimeouts.DownloadStall);
 using var loadCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token, stalled.Token);
 

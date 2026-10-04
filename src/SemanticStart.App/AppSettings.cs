@@ -39,7 +39,7 @@ public sealed record AppSettings
 
     /// <summary>
     /// Whether the dictation hotkey is registered and the speech model is kept warm. Off until
-    /// asked for: turning it on is what authorises the ~73 MB model download, in the same way the
+    /// asked for: turning it on is what authorises the ~665 MB model download, in the same way the
     /// first index build is what authorises the embedding model download.
     /// </summary>
     public bool DictationEnabled { get; init; }

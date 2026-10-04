@@ -29,8 +29,8 @@ dotnet run -c Release -r win-arm64 --project .\benchmarks\DictationLatencyProbe\
 The trailing `5` is the number of utterances to record; it defaults to 5 if omitted. Run the same
 count on both architectures if you are comparing them, so the min/median/p95/max rows line up.
 
-On first run the probe downloads the sherpa-onnx streaming Zipformer and Silero VAD models used by
-`SpeechModelBootstrapper` - about 73 MB in total - into the app's models directory. This is a
+On first run the probe downloads the sherpa-onnx streaming Parakeet and Silero VAD models used by
+`SpeechModelBootstrapper` - about 665 MB in total - into the app's models directory. This is a
 one-time cost per machine; later runs skip straight to loading. Model load (including any
 download) is timed separately from the per-utterance numbers, so a slow first download does not
 pollute the latency measurements.
