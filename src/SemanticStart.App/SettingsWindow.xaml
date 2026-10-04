@@ -141,7 +141,7 @@
                     <StackPanel>
                         <CheckBox x:Name="DictationBox" Content="Dictate into the search box" Checked="Dictation_Changed" Unchecked="Dictation_Changed" />
                         <TextBlock Style="{StaticResource Caption}"
-                                   Text="Speech is recognised on this device by a local model. Nothing is recorded and no audio is sent anywhere. Turning this on downloads about 75 MB of model files once." />
+                                   Text="Speech is recognised on this device by a local model. Nothing is recorded and no audio is sent anywhere. Turning this on downloads about 665 MB once. The NVIDIA Open Model License agreement and attribution Notice are saved beside the weights in %LOCALAPPDATA%\SemanticStart\models (see README.md). The app is MIT; sherpa-onnx is Apache-2.0; NVIDIA weights have their own license." />
                         <TextBlock x:Name="DictationStatus" Style="{StaticResource Caption}" />
                         <ProgressBar x:Name="DictationProgress" Height="4" Margin="0,8,0,0" Visibility="Collapsed"
                                      Minimum="0" Maximum="1" />

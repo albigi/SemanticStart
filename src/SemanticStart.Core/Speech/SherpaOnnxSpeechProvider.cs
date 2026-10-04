@@ -4,8 +4,8 @@ using System.Runtime.InteropServices;
 namespace SemanticStart.Core.Speech;
 
 /// <summary>
-/// The sherpa-onnx streaming Zipformer, as the engine selector sees it: what it is, whether this
-/// machine can run it, and how to load it.
+/// The sherpa-onnx streaming NVIDIA Parakeet (NeMo) model, as the engine selector sees it: what it
+/// is, whether this machine can run it, and how to load it.
 ///
 /// <para>
 /// Availability is answered without loading anything, because it is asked at startup for every
@@ -16,7 +16,7 @@ namespace SemanticStart.Core.Speech;
 /// </summary>
 public sealed class SherpaOnnxSpeechProvider : ISpeechTranscriberProvider
 {
-    public const string ProviderId = "sherpa-onnx-streaming-zipformer";
+    public const string ProviderId = "sherpa-onnx-streaming-parakeet";
 
     private readonly SpeechModelBootstrapper _models;
     private readonly bool _allowDownload;
@@ -30,7 +30,7 @@ public sealed class SherpaOnnxSpeechProvider : ISpeechTranscriberProvider
         // now come from the bootstrapper's options, which an override file can change.
         Metadata = new SpeechProviderMetadata(
             ProviderId,
-            "sherpa-onnx streaming Zipformer",
+            "sherpa-onnx streaming Parakeet",
             _models.ModelId,
             "en-US",
             SupportsPartialResults: true,
@@ -77,7 +77,7 @@ public sealed class SherpaOnnxSpeechProvider : ISpeechTranscriberProvider
         try
         {
             var transcriber = await Task.Run(
-                () => (ISpeechTranscriber)new SherpaOnnxSpeechTranscriber(files, Metadata, _models.Options.MaxActivePaths),
+                () => (ISpeechTranscriber)new SherpaOnnxSpeechTranscriber(files, Metadata),
                 cancellationToken).ConfigureAwait(false);
 
             activity?.SetTag("speech.model_load_ms", loading.Elapsed.TotalMilliseconds);

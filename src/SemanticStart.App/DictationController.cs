@@ -37,7 +37,7 @@ public sealed class DictationController : IDisposable
     /// <para>
     /// A warm recogniser is instant and a cold one is a few hundred milliseconds, so in the
     /// ordinary case the press flows straight into listening. The case this guards is the first
-    /// run, where the wait is a 75 MB download: opening the microphone at the end of that would
+    /// run, where the wait is a ~665 MB download: opening the microphone at the end of that would
     /// mean recording started minutes after the keypress, quite possibly after the user had
     /// stopped paying attention, which is the one thing a microphone must never do. Past this
     /// threshold the overlay reports that dictation is ready and waits to be asked again.
@@ -93,7 +93,7 @@ public sealed class DictationController : IDisposable
     /// </summary>
     private int _awaitingPreparation;
 
-    /// <summary>Last percentage shown, so an identical status line is not re-published 75 MB times.</summary>
+    /// <summary>Last percentage shown, so an identical status line is not re-published hundreds of times.</summary>
     private int _reportedPreparationPercent = -1;
     private int _stopVersion;
 
