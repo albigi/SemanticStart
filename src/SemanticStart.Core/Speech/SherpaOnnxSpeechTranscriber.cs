@@ -70,7 +70,7 @@ public sealed class SherpaOnnxSpeechTranscriber : ISpeechTranscriber
         // Two threads: enough to keep decoding ahead of real time on a laptop core, few enough
         // that a dictation session does not make the rest of the machine stutter. This runs on a
         // user's foreground machine while they are waiting to search, not on a transcription box.
-        config.ModelConfig.NumThreads = Environment.ProcessorCount > 6 ? Environment.ProcessorCount / 3 : 2;
+        config.ModelConfig.NumThreads = Environment.ProcessorCount >= 8 ? 4 : 2;
         // The only decoding method the native Parakeet Unified implementation supports; see the
         // remarks above.
         config.DecodingMethod = "greedy_search";

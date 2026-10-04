@@ -17,7 +17,7 @@ public sealed class SpeechRecognitionConfigTests
         var config = SherpaOnnxSpeechTranscriber.CreateConfig(files);
 
         Assert.Equal("greedy_search", config.DecodingMethod);
-        var expectedThreads = Environment.ProcessorCount > 6 ? Environment.ProcessorCount / 3 : 2;
+        var expectedThreads = Environment.ProcessorCount >= 8 ? 4 : 2;
         Assert.Equal(expectedThreads, config.ModelConfig.NumThreads);
         Assert.Equal(0, config.EnableEndpoint);
         Assert.Equal(16000, config.FeatConfig.SampleRate);
