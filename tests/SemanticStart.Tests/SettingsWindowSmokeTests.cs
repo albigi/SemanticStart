@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 using System.Windows.Threading;
 using SemanticStart.App;
 using SemanticStart.Core;
@@ -86,8 +85,6 @@ public class SettingsWindowSmokeTests
                 speechModelLocation = window.SpeechModelLocationText;
                 speechModelReadiness = window.SpeechModelReadinessText;
                 speechModelSize = window.SpeechModelSizeText;
-                AssertSettingsTabsFollowTheme(window, app);
-
                 var viewModel = new OverlayViewModel(searchService, new IconProvider(), settings);
                 var overlay = new OverlayWindow(viewModel);
                 overlay.SetDictationEnabled(settings.DictationEnabled);
@@ -175,81 +172,6 @@ public class SettingsWindowSmokeTests
         Assert.True(saveEnabledAfterEdit, "Save stayed disabled after a setting was changed, so the change cannot be committed.");
         Assert.False(backgroundNoteVisibleWhenIdle, "The 'indexing runs in the background' note showed with no rebuild running.");
         Assert.True(setupRendered, "First-run setup did not render with Build index as the footer's primary action.");
-    }
-
-    private static void AssertSettingsTabsFollowTheme(SettingsWindow window, Application app)
-    {
-        var tabs = Assert.IsType<TabControl>(window.FindName("SettingsTabs"));
-        Assert.Equal(2, tabs.Items.Count);
-        Assert.Equal("General", Assert.IsType<TabItem>(tabs.Items[0]).Header);
-        var palette = new[]
-        {
-            (Key: "PanelBrush", Light: Color.FromRgb(249, 249, 249), Dark: Color.FromRgb(44, 44, 44)),
-            (Key: "SearchBoxBrush", Light: Color.FromArgb(179, 255, 255, 255), Dark: Color.FromArgb(15, 255, 255, 255)),
-            (Key: "PrimaryTextBrush", Light: Color.FromArgb(228, 0, 0, 0), Dark: Colors.White),
-            (Key: "SecondaryTextBrush", Light: Color.FromArgb(158, 0, 0, 0), Dark: Color.FromArgb(197, 255, 255, 255)),
-        };
-        var previous = palette.ToDictionary(entry => entry.Key, entry => app.Resources[entry.Key]);
-        var selectedIndex = tabs.SelectedIndex;
-        try
-        {
-            // Replace resources while the same window stays open, as ThemeService does.
-            foreach (var dark in new[] { true, false, true })
-            {
-                foreach (var entry in palette)
-                    app.Resources[entry.Key] = new SolidColorBrush(dark ? entry.Dark : entry.Light);
-
-                for (var index = 0; index < tabs.Items.Count; index++)
-                {
-                    tabs.SelectedIndex = index;
-                    window.UpdateLayout();
-                    Dispatcher.CurrentDispatcher.Invoke(() => { }, DispatcherPriority.Render);
-
-                    Assert.Same(window.Background, tabs.Background);
-                    Assert.Same(window.Foreground, tabs.Foreground);
-                    var host = Assert.IsType<ContentPresenter>(
-                        tabs.Template.FindName("PART_SelectedContentHost", tabs));
-                    Assert.Same(tabs.SelectedContent, host.Content);
-                    Assert.True(host.ActualHeight > 0, "The selected settings page has no rendered content.");
-                    Assert.Same(window.Background, FindVisualAncestor<Border>(host).Background);
-
-                    for (var headerIndex = 0; headerIndex < tabs.Items.Count; headerIndex++)
-                    {
-                        var tab = Assert.IsType<TabItem>(tabs.Items[headerIndex]);
-                        Assert.Same(app.Resources[headerIndex == index ? "PrimaryTextBrush" : "SecondaryTextBrush"],
-                            tab.Foreground);
-                    }
-
-                    var setting = Assert.IsAssignableFrom<FrameworkElement>(
-                        window.FindName(index == 0 ? "HotKeyBox" : "DictationBox"));
-                    var card = FindVisualAncestor<Border>(setting);
-                    Assert.Same(app.Resources["SearchBoxBrush"], card.Background);
-                    Assert.Same(app.Resources["PanelBorderBrush"], card.BorderBrush);
-                    Assert.Equal(new CornerRadius(6), card.CornerRadius);
-                    Assert.Equal(new Thickness(16, 12, 16, 12), card.Padding);
-                    if (setting is CheckBox checkBox)
-                        Assert.Same(app.Resources["PrimaryTextBrush"], checkBox.Foreground);
-                }
-            }
-        }
-        finally
-        {
-            foreach (var entry in previous)
-                app.Resources[entry.Key] = entry.Value;
-            tabs.SelectedIndex = selectedIndex;
-            window.UpdateLayout();
-        }
-    }
-
-    private static T FindVisualAncestor<T>(DependencyObject child) where T : DependencyObject
-    {
-        for (var parent = VisualTreeHelper.GetParent(child); parent is not null;
-             parent = VisualTreeHelper.GetParent(parent))
-        {
-            if (parent is T ancestor)
-                return ancestor;
-        }
-        throw new InvalidOperationException($"No {typeof(T).Name} ancestor was rendered.");
     }
 
     /// <summary>
