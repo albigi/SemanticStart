@@ -1,11 +1,11 @@
-# Speech architecture
+# Dictation architecture
 
-A reference for reviewing the dictation feature. For where this sits in the rest of the product,
-see [`architecture.md`](architecture.md).
+A reference for the optional offline dictation feature. For the indexing and search pipeline, see
+[How it works](../README.md#how-it-works).
 
-The whole of dictation does one thing: it sets `OverlayViewModel.Query`. Nothing downstream of the
-query box — search, ranking, launching — knows the text arrived by voice. That is the boundary to
-hold in mind while reading everything below.
+Dictation sends partial and final transcripts to `OverlayViewModel.Query`, which uses the existing
+search path. The controller also coordinates listening state, microphone feedback, and errors; the
+search, ranking, and launch path does not need to know that a query came from speech.
 
 Silero v5.1 consumes 512 new samples (32 ms at 16 kHz) preceded by the previous frame's
 64-sample context. Context starts at zero and is reset along with recurrent state on each turn;
@@ -48,10 +48,11 @@ flowchart TB
         Sherpa["sherpa-onnx 1.13.4"]
     end
 
-    AppStartup -->|"once, background"| Controller
+    AppStartup -->|"background, if enabled"| Controller
     AppStartup --> Telemetry
     Activation -->|"hotkey pressed"| Controller
-    Settings -->|"enable / download"| Controller
+    Settings -->|"enable / manage models"| Bootstrapper
+    Settings -->|"warm recognizer"| Controller
     Controller -->|"WarmStartAsync"| Selector
     Selector --> Provider
     Provider --> Bootstrapper
@@ -85,16 +86,15 @@ flowchart TB
     class Wasapi,Ort,Sherpa nativeNode
 ```
 
-Solid arrows are calls; dotted arrows are native boundaries or diagnostics, which are one-way and
-never load-bearing.
+Solid arrows show calls or data flow; dotted arrows mark native boundaries or one-way diagnostics.
 
 ## Two timelines, and why they are separate
 
-Everything expensive happens once, at startup. Everything on the hotkey path is bookkeeping. This
-is the single most important property of the design: a first utterance that loses its opening
-words while a model loads is worse than one that never started.
+When dictation is enabled, the recognizer is warmed before the first listening turn: at app startup
+if already enabled, or when enabled from Settings. Model preparation is initiated there rather than
+by the hotkey; a press made while preparation is still underway waits for it to finish.
 
-### Startup — once per process
+### Startup (once per process)
 
 ```mermaid
 sequenceDiagram
@@ -106,9 +106,10 @@ sequenceDiagram
     participant Trn as SherpaOnnxSpeechTranscriber
 
     App->>Ctl: new DictationController(...)
-    App->>Ctl: WarmStartAsync() — not awaited
+    Note over App,Ctl: WarmStartAsync runs in background only when dictation is enabled
+    App->>Ctl: WarmStartAsync() — not awaited, when enabled
     Ctl->>Sel: StartAsync(_startup.Token)
-    loop each provider, in preference order
+    loop configured providers (one currently)
         Sel->>Prv: CheckAvailability()
         Note right of Prv: cheap by contract:<br/>OS, architecture, model present
         alt unavailable
@@ -130,7 +131,7 @@ dictation, and the reason is exactly what the user needs when they press the hot
 happens. Every rejection is logged with its exception intact, not just the first one that reaches
 the status line.
 
-### One listening turn — per hotkey press
+### One listening turn per hotkey press
 
 ```mermaid
 sequenceDiagram
