@@ -59,9 +59,9 @@ First launch builds the index and downloads the embedding model once — see [Us
   <img alt="Indexing runs offline: collectors, enrichment, synthesis and embeddings build index.sqlite. Querying is local: Win+Alt+. runs a vector arm and a lexical BM25 arm in parallel over that index, fused by RRF into the overlay." src="docs/pipeline-light.svg">
 </picture>
 
-A code-level companion to this section — projects, folders, and what calls what — is in
-[`docs/architecture.md`](docs/architecture.md), with dictation broken out separately in
-[`docs/architecture-speech.md`](docs/architecture-speech.md).
+The dictation architecture diagrams are in [`docs/architecture-speech.md`](docs/architecture-speech.md):
+[the system shape](docs/architecture-speech.md#the-shape-of-it), [model startup](docs/architecture-speech.md#startup-once-per-process),
+and [a listening turn](docs/architecture-speech.md#one-listening-turn-per-hotkey-press).
 
 **Indexing (offline).** Ten collectors enumerate what is on the machine, in this order — the order
 is deduplication precedence, so an earlier source wins when the same thing is found twice:
@@ -553,7 +553,7 @@ data: it lives in `%LOCALAPPDATA%\SemanticStart` and is ignored by source contro
 | `src/SemanticStart.App` | WPF overlay, activation, tray icon, settings, and `--mcp` stdio server mode |
 | `tests/SemanticStart.Tests` | Unit and regression tests |
 | `tools/make-icon.ps1` | Redraws the app icon (`src/SemanticStart.App/Assets/SemanticStart.ico`) |
-| `docs/architecture.md` | Code-level map of the solution, with [dictation](docs/architecture-speech.md) broken out |
+| `docs/architecture-speech.md` | Dictation architecture diagrams and implementation notes |
 
 The icon is generated rather than drawn by hand so that every size in the `.ico` is rendered at its
 own resolution — a 16px tray icon resampled from a big bitmap loses the magnifier's ring. Run the
