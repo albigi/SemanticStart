@@ -69,6 +69,8 @@ public sealed class SherpaOnnxSpeechProvider : ISpeechTranscriberProvider
         activity?.SetTag("speech.model", _models.ModelId);
 
         var files = await _models.EnsureAsync(downloadProgress, cancellationToken).ConfigureAwait(false);
+        var numThreads = await SpeechInferenceThreads.SelectAsync(cancellationToken).ConfigureAwait(false);
+        activity?.SetTag("speech.inference_threads", numThreads);
 
         // Constructing the recognizer opens three ONNX sessions and is the slow part of startup,
         // which is exactly why it happens here, once, rather than on the dictation hotkey. The
@@ -77,7 +79,7 @@ public sealed class SherpaOnnxSpeechProvider : ISpeechTranscriberProvider
         try
         {
             var transcriber = await Task.Run(
-                () => (ISpeechTranscriber)new SherpaOnnxSpeechTranscriber(files, Metadata),
+                () => (ISpeechTranscriber)new SherpaOnnxSpeechTranscriber(files, Metadata, numThreads),
                 cancellationToken).ConfigureAwait(false);
 
             activity?.SetTag("speech.model_load_ms", loading.Elapsed.TotalMilliseconds);

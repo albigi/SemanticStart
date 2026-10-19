@@ -348,8 +348,10 @@ Known limitations:
 - If Windows denies microphone access the overlay says so and names the setting to change -
   **Let desktop apps access your microphone** - rather than simply transcribing nothing.
 
-`benchmarks/DictationLatencyProbe` measures microphone-to-first-partial and microphone-to-final
-latency on real hardware; see its README. The types involved, the startup and per-utterance paths,
+Inference uses four threads when processor capacity permits, selected automatically when the speech
+engine loads from the processor count and a short Windows CPU-load sample. Smaller or busy machines
+use fewer threads (down to one); no benchmark or additional user setting is needed.
+The types involved, the startup and per-utterance paths,
 and the failure paths are drawn out in [`docs/architecture-speech.md`](docs/architecture-speech.md).
 
 Dictation logs to the same `%LOCALAPPDATA%\SemanticStart\logs\app.log` as the rest of the app, and
@@ -554,7 +556,6 @@ data: it lives in `%LOCALAPPDATA%\SemanticStart` and is ignored by source contro
 | `src/SemanticStart.App` | WPF overlay, activation, tray icon, settings, and `--mcp` stdio server mode |
 | `tests/SemanticStart.Tests` | Unit and regression tests |
 | `tools/make-icon.ps1` | Redraws the app icon (`src/SemanticStart.App/Assets/SemanticStart.ico`) |
-| `benchmarks/DictationLatencyProbe` | Measures dictation latency on real hardware (not in the solution) |
 | `docs/architecture.md` | Code-level map of the solution, with [dictation](docs/architecture-speech.md) broken out |
 
 The icon is generated rather than drawn by hand so that every size in the `.ico` is rendered at its

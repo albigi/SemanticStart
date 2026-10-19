@@ -15,21 +15,19 @@ flowchart TB
     App["SemanticStart.App<br/><i>WPF overlay, tray, --mcp mode</i>"]
     Cli["SemanticStart.Cli<br/><i>index, search, eval, stats, enrich, diagnose</i>"]
     Tests["SemanticStart.Tests"]
-    Probe1["benchmarks/DictationLatencyProbe"]
     Probe2["benchmarks/TensorPrimitivesProbe"]
 
     App --> Core
     Cli --> Core
     Tests --> Core
     Tests --> App
-    Probe1 -.-> Core
 
     classDef outside stroke-dasharray: 4 4
-    class Probe1,Probe2 outside
+    class Probe2 outside
 ```
 
-Dashed projects are not in `SemanticStart.slnx` — they are run by hand on real hardware and are
-deliberately kept out of the build. `Core` never references `App`: the query engine is a standalone
+The dashed project is not in `SemanticStart.slnx` — it is run by hand and is deliberately kept
+out of the build. `Core` never references `App`: the query engine is a standalone
 library with no UI dependency, so it can back a Command Palette or PowerToys Run extension later.
 
 ## Core, by folder
