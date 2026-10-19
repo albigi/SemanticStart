@@ -348,9 +348,6 @@ Known limitations:
 - If Windows denies microphone access the overlay says so and names the setting to change -
   **Let desktop apps access your microphone** - rather than simply transcribing nothing.
 
-Inference uses four threads when processor capacity permits, selected automatically when the speech
-engine loads from the processor count and a short Windows CPU-load sample. Smaller or busy machines
-use fewer threads (down to one); no benchmark or additional user setting is needed.
 The types involved, the startup and per-utterance paths,
 and the failure paths are drawn out in [`docs/architecture-speech.md`](docs/architecture-speech.md).
 

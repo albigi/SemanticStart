@@ -23,12 +23,11 @@ public sealed class SherpaOnnxSpeechTranscriber : ISpeechTranscriber
     private readonly OnlineRecognizer _recognizer;
     private bool _disposed;
 
-    public SherpaOnnxSpeechTranscriber(
-        SpeechModelFiles files, SpeechProviderMetadata metadata, int? numThreads = null)
+    public SherpaOnnxSpeechTranscriber(SpeechModelFiles files, SpeechProviderMetadata metadata)
     {
         ArgumentNullException.ThrowIfNull(files);
         Metadata = metadata;
-        _recognizer = new OnlineRecognizer(CreateConfig(files, numThreads));
+        _recognizer = new OnlineRecognizer(CreateConfig(files));
     }
 
     /// <summary>
@@ -54,11 +53,8 @@ public sealed class SherpaOnnxSpeechTranscriber : ISpeechTranscriber
     /// style <see cref="SpeechTextFormatter"/> was written to clean up.
     /// </para>
     /// </summary>
-    internal static OnlineRecognizerConfig CreateConfig(SpeechModelFiles files, int? numThreads = null)
+    internal static OnlineRecognizerConfig CreateConfig(SpeechModelFiles files)
     {
-        var threads = numThreads ?? SpeechInferenceThreads.Select(Environment.ProcessorCount);
-        ArgumentOutOfRangeException.ThrowIfLessThan(threads, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(threads, 4);
         var config = new OnlineRecognizerConfig();
         config.FeatConfig.SampleRate = MonoFloatResampler.TargetSampleRate;
         // Overridden to 128 by the native recognizer once it reads the model's own feature
@@ -71,7 +67,10 @@ public sealed class SherpaOnnxSpeechTranscriber : ISpeechTranscriber
         config.ModelConfig.Tokens = files.TokensPath;
         config.ModelConfig.Provider = "cpu";
 
-        config.ModelConfig.NumThreads = threads;
+        // Two threads: enough to keep decoding ahead of real time on a laptop core, few enough
+        // that a dictation session does not make the rest of the machine stutter. This runs on a
+        // user's foreground machine while they are waiting to search, not on a transcription box.
+        config.ModelConfig.NumThreads = Environment.ProcessorCount >= 8 ? 4 : 2;
         // The only decoding method the native Parakeet Unified implementation supports; see the
         // remarks above.
         config.DecodingMethod = "greedy_search";

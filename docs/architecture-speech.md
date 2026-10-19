@@ -232,21 +232,6 @@ Decoding is synchronous CPU-bound work on whichever thread enumerates the transc
 that thread must never be the UI thread — `DictationController.RunSessionAsync` is what guarantees
 it, by marshalling only the results back through the dispatcher.
 
-The provider selects the recognizer's thread count once when the model loads. The baseline and
-CPU-count fallback is four threads, limited to the available logical processors. On Windows,
-`SpeechInferenceThreads` reads `GetSystemTimes` twice, 200 ms apart, to estimate current CPU load;
-the count is reduced only when estimated idle logical-processor capacity is below four.
-Idle capacity is rounded up, with a minimum of one thread. For example, an eight-processor machine
-at 50% load still uses four threads, while at 75% load it uses two. Silero remains single-threaded.
-
-Windows exposes cumulative CPU times, not a ready-made 30-second average through this API.
-There is no rolling history, background monitoring, benchmark, or per-utterance sampling. The
-short asynchronous sample happens after model download and before native recognizer construction.
-An unavailable or invalid sample falls back to processor count, and failures are reported through
-`SpeechDiagnostics`. Systems with multiple processor groups also use the fallback because
-`GetSystemTimes` only covers the calling processor group there. The selection is logged and stays
-fixed until the engine is recreated; it does not promise to track later changes in system load.
-
 ## Failure paths
 
 None of these are silent. The rule for this feature is that a dictation session producing no words

@@ -14,10 +14,9 @@ public sealed class SpeechRecognitionConfigTests
     {
         var files = new SpeechModelFiles("encoder", "decoder", "joiner", "tokens", "vad");
 
-        var config = SherpaOnnxSpeechTranscriber.CreateConfig(files, numThreads: 4);
+        var config = SherpaOnnxSpeechTranscriber.CreateConfig(files);
 
         Assert.Equal("greedy_search", config.DecodingMethod);
-        Assert.Equal(4, config.ModelConfig.NumThreads);
         Assert.Equal(0, config.EnableEndpoint);
         Assert.Equal(16000, config.FeatConfig.SampleRate);
         Assert.Equal(128, config.FeatConfig.FeatureDim);
@@ -25,37 +24,5 @@ public sealed class SpeechRecognitionConfigTests
         Assert.Equal(files.DecoderPath, config.ModelConfig.Transducer.Decoder);
         Assert.Equal(files.JoinerPath, config.ModelConfig.Transducer.Joiner);
         Assert.Equal(files.TokensPath, config.ModelConfig.Tokens);
-    }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
-    public void SelectedThreadCountReachesNativeConfiguration(int threads)
-    {
-        var files = new SpeechModelFiles("encoder", "decoder", "joiner", "tokens", "vad");
-
-        Assert.Equal(threads, SherpaOnnxSpeechTranscriber.CreateConfig(files, numThreads: threads).ModelConfig.NumThreads);
-    }
-
-    [Fact]
-    public void DefaultThreadCountUsesProcessorCountFallback()
-    {
-        var files = new SpeechModelFiles("encoder", "decoder", "joiner", "tokens", "vad");
-
-        Assert.Equal(Math.Min(Environment.ProcessorCount, 4),
-            SherpaOnnxSpeechTranscriber.CreateConfig(files).ModelConfig.NumThreads);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(5)]
-    public void InvalidThreadCountsAreRejected(int threads)
-    {
-        var files = new SpeechModelFiles("encoder", "decoder", "joiner", "tokens", "vad");
-
-        Assert.Throws<ArgumentOutOfRangeException>(
-            () => SherpaOnnxSpeechTranscriber.CreateConfig(files, numThreads: threads));
     }
 }
